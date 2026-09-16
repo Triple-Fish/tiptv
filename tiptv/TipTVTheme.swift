@@ -325,9 +325,4 @@ struct tiptvBrandLogo: View {
 
 // MARK: - Compatibility Typealiases
 typealias TipTVTheme = tiptvTheme
-typealias tivvyTheme = tiptvTheme
-typealias TivvyTheme = tiptvTheme
-
 typealias TipTVBrandLogo = tiptvBrandLogo
-typealias tivvyBrandLogo = tiptvBrandLogo
-typealias TivvyBrandLogo = tiptvBrandLogo
