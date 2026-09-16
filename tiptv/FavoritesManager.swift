@@ -16,7 +16,7 @@ final class FavoritesManager: ObservableObject {
     @Published private(set) var favoriteStreamURLs: Set<String> = []
 
     init() {
-        if let saved = (UserDefaults.standard.array(forKey: userDefaultsKey) ?? UserDefaults.standard.array(forKey: "tivvy_favorite_urls")) as? [String] {
+        if let saved = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {
             favoriteStreamURLs = Set(saved)
         }
     }

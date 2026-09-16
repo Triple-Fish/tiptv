@@ -251,9 +251,9 @@ final class ThemeManager: ObservableObject {
     }
 
     init() {
-        let saved = UserDefaults.standard.string(forKey: userDefaultsKey) ?? UserDefaults.standard.string(forKey: "tivvy_selected_theme")
+        let saved = UserDefaults.standard.string(forKey: userDefaultsKey)
         if let saved = saved {
-            if saved == "Obsidian Indigo" || saved == "tivvy Cyan" || saved == "tivvy Teal" || saved == "tiptv Cyan" || saved == "tiptv Teal" {
+            if saved == "tiptv Cyan" || saved == "tiptv Teal" {
                 currentTheme = .tiptvCyan
             } else if let theme = AppTheme(rawValue: saved) {
                 currentTheme = theme

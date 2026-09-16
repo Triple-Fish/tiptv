@@ -30,7 +30,7 @@ final class LicenseManager: ObservableObject {
     private var transactionListenerTask: Task<Void, Never>?
 
     init() {
-        if let storedDate = (UserDefaults.standard.object(forKey: trialStartDateKey) ?? UserDefaults.standard.object(forKey: "tivvy_trial_start_date")) as? Date {
+        if let storedDate = UserDefaults.standard.object(forKey: trialStartDateKey) as? Date {
             self.trialStartDate = storedDate
         } else {
             let now = Date()
@@ -38,7 +38,7 @@ final class LicenseManager: ObservableObject {
             self.trialStartDate = now
         }
 
-        self.hasPurchasedLicense = UserDefaults.standard.bool(forKey: hasPurchasedLicenseKey) || UserDefaults.standard.bool(forKey: "tivvy_has_purchased_license")
+        self.hasPurchasedLicense = UserDefaults.standard.bool(forKey: hasPurchasedLicenseKey)
 
         transactionListenerTask = listenForTransactions()
 

@@ -17,7 +17,7 @@ final class RecentChannelsManager: ObservableObject {
     @Published private(set) var recentStreamURLs: [String] = []
 
     init() {
-        if let saved = (UserDefaults.standard.array(forKey: userDefaultsKey) ?? UserDefaults.standard.array(forKey: "tivvy_recent_channel_urls")) as? [String] {
+        if let saved = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {
             recentStreamURLs = saved
         }
     }

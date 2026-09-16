@@ -16,7 +16,7 @@ final class HiddenChannelsManager: ObservableObject {
     @Published private(set) var hiddenStreamURLs: Set<String> = []
 
     init() {
-        if let saved = (UserDefaults.standard.array(forKey: userDefaultsKey) ?? UserDefaults.standard.array(forKey: "tivvy_hidden_channel_urls")) as? [String] {
+        if let saved = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {
             hiddenStreamURLs = Set(saved)
         }
     }
