@@ -8,8 +8,6 @@
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
-		<key>NSAllowsArbitraryLoadsForMedia</key>
-		<true/>
 	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
