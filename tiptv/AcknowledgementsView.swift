@@ -58,7 +58,7 @@ struct AcknowledgementsView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("tiptv is made possible thanks to the following open-source software libraries. In accordance with their license terms and Apple App Store Review Guideline 5.2.2, copyright notices and links to source repositories are provided below.")
+                    Text("Tiptv is made possible thanks to the following open-source software libraries. In accordance with their license terms and Apple App Store Review Guideline 5.2.2, copyright notices and links to source repositories are provided below.")
                         .font(.system(.footnote, design: .rounded))
                         .foregroundStyle(.white.opacity(0.75))
                         .lineSpacing(3)

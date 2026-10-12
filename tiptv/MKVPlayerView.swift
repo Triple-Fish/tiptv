@@ -9,13 +9,13 @@ import SwiftUI
 
 struct MKVPlayerView: View {
     let url: URL
-    var coordinator: KSVideoPlayer.Coordinator? = nil
+    let coordinator: KSVideoPlayer.Coordinator
     var isAspectFill: Bool = false
 
-    @StateObject private var fallbackCoordinator = KSVideoPlayer.Coordinator()
-
-    private var activeCoordinator: KSVideoPlayer.Coordinator {
-        coordinator ?? fallbackCoordinator
+    init(url: URL, coordinator: KSVideoPlayer.Coordinator, isAspectFill: Bool = false) {
+        self.url = url
+        self.coordinator = coordinator
+        self.isAspectFill = isAspectFill
     }
 
     private var options: KSOptions {
@@ -28,17 +28,20 @@ struct MKVPlayerView: View {
     }
 
     var body: some View {
-        KSVideoPlayer(coordinator: activeCoordinator, url: url, options: options)
+        KSVideoPlayer(coordinator: coordinator, url: url, options: options)
+            .id(url)
             .allowsHitTesting(false)
             .onChange(of: isAspectFill) { _, fill in
-                activeCoordinator.isScaleAspectFill = fill
+                coordinator.isScaleAspectFill = fill
             }
             .onAppear {
-                activeCoordinator.isScaleAspectFill = isAspectFill
+                coordinator.isScaleAspectFill = isAspectFill
             }
             .onDisappear {
-                activeCoordinator.playerLayer?.pause()
-                activeCoordinator.resetPlayer()
+                coordinator.playerLayer?.pause()
+                coordinator.playerLayer?.stop()
+                coordinator.resetPlayer()
+                IdleTimerManager.setDisabled(false)
             }
     }
 }

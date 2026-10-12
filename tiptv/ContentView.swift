@@ -10,35 +10,33 @@ import KSPlayer
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case home = "Home"
     case tvGuide = "TV Guide"
     case movies = "Movies"
     case series = "Series"
+    case favorites = "Favourites"
     case more = "More"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .home: return "house.fill"
         case .tvGuide: return "tv"
         case .movies: return "film"
         case .series: return "tv.inset.filled"
+        case .favorites: return "heart.fill"
         case .more: return "ellipsis"
         }
     }
 }
 
 enum ActiveSheet: Identifiable {
-    case search
     case settings
     case playlistImport
 
     var id: Int {
         switch self {
-        case .search: return 1
-        case .settings: return 2
-        case .playlistImport: return 3
+        case .settings: return 1
+        case .playlistImport: return 2
         }
     }
 }
@@ -47,11 +45,12 @@ struct ContentView: View {
     @AppStorage("playlistURL") private var playlistURL = ""
     @AppStorage("playlistUsername") private var playlistUsername = ""
     @AppStorage("playlistPassword") private var playlistPassword = ""
-    @ObservedObject private var favoritesManager = FavoritesManager.shared
-    @ObservedObject private var hiddenChannelsManager = HiddenChannelsManager.shared
+    @AppStorage("epgURL") private var epgURL = ""
+    @State private var favoritesManager = FavoritesManager.shared
+    @State private var hiddenChannelsManager = HiddenChannelsManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var licenseManager = LicenseManager.shared
-    @ObservedObject private var playerEngine = PlayerEngineManager.shared
+    @State private var playerEngine = PlayerEngineManager.shared
     @State private var isUsingKSPlayer = false
     @State private var videoValidationTask: Task<Void, Never>? = nil
     @State private var presentationSizeObserver: NSKeyValueObservation? = nil
@@ -66,17 +65,20 @@ struct ContentView: View {
     @State private var streamErrorMessage: String? = nil
     @State private var isStreamLoading = false
     @State private var activeStatusObserver: NSKeyValueObservation? = nil
-    @State private var selectedTab: AppTab = .home
+    @State private var selectedTab: AppTab = .tvGuide
     @State private var searchText = ""
-    @State private var selectedCategory: NetflixCategory = .all
+    @State private var movieSearchText = ""
+    @State private var seriesSearchText = ""
+    @State private var favoritesSearchText = ""
+    @State private var selectedCategory: ChannelCategory = .all
     @State private var activeSheet: ActiveSheet?
     @State private var isLoadingPlaylist = false
     @State private var playlistMessage: String?
     @State private var isPresentingFullScreenPlayer = false
 
     @State private var visibleChannels: [Channel] = []
-    @State private var categoryCounts: [NetflixCategory: Int] = [:]
-    @State private var availableCategories: [NetflixCategory] = [.all]
+    @State private var categoryCounts: [ChannelCategory: Int] = [:]
+    @State private var availableCategories: [ChannelCategory] = [.all]
     @State private var filteredChannels: [Channel] = []
     @State private var searchDebounceTask: Task<Void, Never>?
 
@@ -92,10 +94,10 @@ struct ContentView: View {
     }
 
     private func updateCategoryState() {
-        var counts: [NetflixCategory: Int] = [.all: visibleChannels.count]
+        var counts: [ChannelCategory: Int] = [.all: visibleChannels.count]
         var favCount = 0
         let favURLs = favoritesManager.favoriteStreamURLs
-        var presentCats = Set<NetflixCategory>()
+        var presentCats = Set<ChannelCategory>()
 
         for ch in visibleChannels {
             let cat = ch.category
@@ -107,11 +109,11 @@ struct ContentView: View {
         }
         counts[.favorites] = favCount
 
-        var categories: [NetflixCategory] = [.all]
+        var categories: [ChannelCategory] = [.all]
         if favCount > 0 {
             categories.append(.favorites)
         }
-        for cat in NetflixCategory.allCases where cat != .all && cat != .favorites {
+        for cat in ChannelCategory.allCases where cat != .all && cat != .favorites {
             if presentCats.contains(cat) {
                 categories.append(cat)
             }
@@ -274,16 +276,12 @@ struct ContentView: View {
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
-            case .search:
-                ChannelSearchView(
-                    channels: visibleChannels,
-                    onSelectChannel: selectChannel
-                )
             case .settings:
                 NavigationStack {
                     SettingsView(
                         playlistURL: $playlistURL,
                         username: $playlistUsername,
+                        epgURL: $epgURL,
                         totalChannels: visibleChannels.count,
                         allChannels: channels,
                         onReload: {
@@ -356,13 +354,13 @@ struct ContentView: View {
         .onChange(of: searchText) { _, _ in
             queueSearchFilter()
         }
-        .onReceive(favoritesManager.$favoriteStreamURLs) { _ in
+        .onChange(of: favoritesManager.favoriteStreamURLs) { _, _ in
             updateCategoryState()
             if selectedCategory == .favorites {
                 updateFilteredChannels()
             }
         }
-        .onReceive(hiddenChannelsManager.$hiddenStreamURLs) { _ in
+        .onChange(of: hiddenChannelsManager.hiddenStreamURLs) { _, _ in
             updateVisibleChannels()
         }
     }
@@ -370,29 +368,6 @@ struct ContentView: View {
     @ViewBuilder
     private var tabContent: some View {
         switch selectedTab {
-        case .home:
-            HomeView(
-                channels: visibleChannels,
-                allChannels: channels,
-                onSelectChannel: selectChannel,
-                onSelectCategory: { category in
-                    selectedCategory = category
-                    withAnimation {
-                        selectedTab = .tvGuide
-                    }
-                },
-                onReloadPlaylist: {
-                    Task {
-                        await loadPlaylist()
-                    }
-                },
-                onDeletePlaylist: deletePlaylist,
-                onAddPlaylist: {
-                    activeSheet = .playlistImport
-                }
-            )
-            .padding(.bottom, 68)
-
         case .tvGuide:
             NavigationStack {
                 ChannelLibraryView(
@@ -417,49 +392,77 @@ struct ContentView: View {
             .padding(.bottom, 68)
 
         case .movies:
-            MoviesCatalogView(
-                items: movies,
-                title: "Movies",
-                isLoading: isLoadingVOD,
-                onSelectChannel: { channel in
-                    let movieItem = Channel(
-                        id: channel.id,
-                        name: channel.name,
-                        uniformName: channel.uniformName,
-                        group: channel.group,
-                        logoURL: channel.logoURL,
-                        streamURL: channel.streamURL,
-                        streamURLString: channel.streamURLString,
-                        category: .movies
-                    )
-                    selectChannel(movieItem)
-                },
-                onReload: {
-                    Task {
-                        await loadVODContent()
+            NavigationStack {
+                MoviesCatalogView(
+                    items: movies,
+                    title: "Movies",
+                    isLoading: isLoadingVOD,
+                    searchText: $movieSearchText,
+                    onSelectChannel: { channel in
+                        let movieItem = Channel(
+                            id: channel.id,
+                            name: channel.name,
+                            uniformName: channel.uniformName,
+                            group: channel.group,
+                            logoURL: channel.logoURL,
+                            streamURL: channel.streamURL,
+                            streamURLString: channel.streamURLString,
+                            category: .movies
+                        )
+                        selectChannel(movieItem)
+                    },
+                    onReload: {
+                        Task {
+                            await loadVODContent()
+                        }
                     }
-                }
-            )
+                )
+            }
             .padding(.bottom, 68)
 
         case .series:
-            MoviesCatalogView(
-                items: series,
-                title: "Series",
-                isLoading: isLoadingVOD,
-                onSelectChannel: selectChannel,
-                onReload: {
-                    Task {
-                        await loadVODContent()
+            NavigationStack {
+                MoviesCatalogView(
+                    items: series,
+                    title: "Series",
+                    isLoading: isLoadingVOD,
+                    searchText: $seriesSearchText,
+                    onSelectChannel: selectChannel,
+                    onReload: {
+                        Task {
+                            await loadVODContent()
+                        }
                     }
-                }
-            )
+                )
+            }
+            .padding(.bottom, 68)
+
+        case .favorites:
+            NavigationStack {
+                FavoritesCatalogView(
+                    channels: visibleChannels,
+                    movies: movies,
+                    series: series,
+                    baseURL: playlistURL,
+                    username: playlistUsername,
+                    password: playlistPassword,
+                    searchText: $favoritesSearchText,
+                    onSelectChannel: selectChannel,
+                    onSelectMovie: { movieItem in
+                        selectChannel(movieItem)
+                    },
+                    onPlayEpisode: { epChannel in
+                        selectChannel(epChannel)
+                    }
+                )
+            }
             .padding(.bottom, 68)
 
         case .more:
             SettingsView(
                 playlistURL: $playlistURL,
                 username: $playlistUsername,
+                epgURL: $epgURL,
                 totalChannels: visibleChannels.count,
                 allChannels: channels,
                 onReload: {
@@ -1000,6 +1003,9 @@ struct ContentView: View {
         activeDetailChannel = nil
         selectedCategory = .all
         searchText = ""
+        movieSearchText = ""
+        seriesSearchText = ""
+        favoritesSearchText = ""
         playlistMessage = nil
     }
 
@@ -1065,9 +1071,9 @@ struct BottomTabBar: View {
 struct ChannelLibraryView: View {
     let channels: [Channel]
     let totalChannelCount: Int
-    let categories: [NetflixCategory]
-    let categoryCounts: [NetflixCategory: Int]
-    @Binding var selectedCategory: NetflixCategory
+    let categories: [ChannelCategory]
+    let categoryCounts: [ChannelCategory: Int]
+    @Binding var selectedCategory: ChannelCategory
     @Binding var selectedChannelID: Channel.ID?
     @Binding var searchText: String
     let isLoading: Bool
@@ -1076,7 +1082,7 @@ struct ChannelLibraryView: View {
     let reloadPlaylist: () -> Void
     let deletePlaylist: () -> Void
 
-    @ObservedObject private var favoritesManager = FavoritesManager.shared
+    @State private var favoritesManager = FavoritesManager.shared
     @State private var isShowingDeleteConfirmation = false
     @State private var displayLimit = 250
 
@@ -1294,7 +1300,7 @@ struct FullScreenPlayerView: View {
     let onStop: () -> Void
     var onTogglePlayerEngine: (() -> Void)? = nil
 
-    @ObservedObject private var favoritesManager = FavoritesManager.shared
+    @State private var favoritesManager = FavoritesManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var pipManager = PiPManager.shared
 
@@ -1520,6 +1526,17 @@ struct FullScreenPlayerView: View {
                     )
                 }
                 .accessibilityLabel("Toggle Player Engine (Currently \(isFFmpegActive ? "FFmpeg" : "Native"))")
+            }
+
+            // AirPlay is available for the native AVPlayer engine.
+            if !isFFmpegActive, player != nil {
+                AirPlayRoutePicker()
+                    .frame(width: 34, height: 34)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(
+                        Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+                    )
+                    .accessibilityLabel("AirPlay")
             }
 
             // Picture-in-Picture Button
@@ -2156,9 +2173,9 @@ struct MiniPlayerBar: View {
 // MARK: - Netflix-Style Category Pills Bar
 
 struct CategoryPillsBar: View {
-    let categories: [NetflixCategory]
-    let categoryCounts: [NetflixCategory: Int]
-    @Binding var selectedCategory: NetflixCategory
+    let categories: [ChannelCategory]
+    let categoryCounts: [ChannelCategory: Int]
+    @Binding var selectedCategory: ChannelCategory
     @Namespace private var pillNamespace
 
     var body: some View {
@@ -2344,86 +2361,6 @@ struct ChannelRow: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint(isSelected ? "Currently playing" : "Plays this channel")
-    }
-}
-
-// MARK: - In-Memory & Network Artwork Cache
-
-final class ImageCacheManager: @unchecked Sendable {
-    static let shared = ImageCacheManager()
-
-    private let cache = NSCache<NSURL, UIImage>()
-    private let failedURLs = NSCache<NSURL, NSNumber>()
-    private let session: URLSession
-
-    private init() {
-        cache.countLimit = 1000
-        cache.totalCostLimit = 50 * 1024 * 1024 // 50MB RAM limit
-        failedURLs.countLimit = 5000
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 4
-        config.timeoutIntervalForResource = 6
-        config.httpMaximumConnectionsPerHost = 3
-        config.requestCachePolicy = .returnCacheDataElseLoad
-        self.session = URLSession(configuration: config)
-    }
-
-    func image(for url: URL) -> UIImage? {
-        cache.object(forKey: url as NSURL)
-    }
-
-    func isFailed(url: URL) -> Bool {
-        failedURLs.object(forKey: url as NSURL) != nil
-    }
-
-    func setImage(_ image: UIImage, for url: URL) {
-        let cost = Int(image.size.width * image.size.height * 4)
-        cache.setObject(image, forKey: url as NSURL, cost: cost)
-    }
-
-    func loadImage(from url: URL) async -> UIImage? {
-        if let cached = image(for: url) {
-            return cached
-        }
-        if isFailed(url: url) {
-            return nil
-        }
-
-        do {
-            var request = URLRequest(url: url)
-            request.setValue(XtreamService.defaultUserAgent, forHTTPHeaderField: "User-Agent")
-            let (data, response) = try await session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode),
-                  let uiImage = downsample(data: data, to: 300) ?? UIImage(data: data) else {
-                failedURLs.setObject(NSNumber(value: true), forKey: url as NSURL)
-                return nil
-            }
-            setImage(uiImage, for: url)
-            return uiImage
-        } catch {
-            failedURLs.setObject(NSNumber(value: true), forKey: url as NSURL)
-            return nil
-        }
-    }
-
-    private func downsample(data: Data, to maxPixelSize: CGFloat) -> UIImage? {
-        let options: [CFString: Any] = [
-            kCGImageSourceShouldCache: false
-        ]
-        guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
-            return nil
-        }
-        let downsampleOptions: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
-            return nil
-        }
-        return UIImage(cgImage: cgImage)
     }
 }
 
@@ -2824,298 +2761,6 @@ struct PlaylistImportView: View {
             }
             .tint(tiptvTheme.accent)
         }
-    }
-}
-
-// MARK: - Models & Helpers
-
-struct Channel: Identifiable, Equatable, Sendable {
-    let id: UUID
-    let name: String
-    let uniformName: String
-    let group: String?
-    let logoURL: URL?
-    let streamURL: URL
-    let streamURLString: String
-    let category: NetflixCategory
-    let searchKey: String
-
-    nonisolated init(
-        id: UUID = UUID(),
-        name: String,
-        uniformName: String? = nil,
-        group: String? = nil,
-        logoURL: URL? = nil,
-        streamURL: URL,
-        streamURLString: String? = nil,
-        category: NetflixCategory? = nil
-    ) {
-        self.id = id
-        self.name = name
-        self.group = group
-        self.logoURL = logoURL
-        self.streamURL = streamURL
-        let resolvedURLString = streamURLString ?? streamURL.absoluteString
-        self.streamURLString = resolvedURLString
-        let resolvedUniformName = uniformName ?? PlaylistParser.uniformChannelName(name)
-        self.uniformName = resolvedUniformName
-        self.category = category ?? NetflixCategory.classify(group: group, name: name)
-        self.searchKey = "\(name) \(resolvedUniformName) \(group ?? "")".lowercased()
-    }
-
-    static func == (lhs: Channel, rhs: Channel) -> Bool {
-        lhs.id == rhs.id
-    }
-
-    var isMovie: Bool {
-        if category == .movies { return true }
-        let lowerURL = streamURLString.lowercased()
-        if lowerURL.contains("/movie/") || lowerURL.contains("/movies/") || lowerURL.contains("/vod/") || lowerURL.contains("/vods/") {
-            return true
-        }
-        if lowerURL.contains("/series/") { return false }
-        let groupLower = group?.lowercased() ?? ""
-        if groupLower.contains("series") || groupLower.contains("season") || groupLower.contains("boxset") || groupLower.contains("episodes") {
-            return false
-        }
-        let nameLower = name.lowercased()
-        if nameLower.contains("s01") || nameLower.contains("s02") || nameLower.contains("s03") || nameLower.contains("e01") || nameLower.contains("e02") {
-            return false
-        }
-
-        // Group-based detection for movie categories
-        let movieGroupKeywords = [
-            "movie", "vod", "cinema", "film", "films", "kino", "pelicula", "filme",
-            "action", "comedy", "thriller", "horror", "drama", "sci-fi",
-            "romance", "adventure", "crime", "family", "animation",
-            "western", "war", "fantasy", "mystery", "hollywood", "box office",
-            "disney", "netflix", "prime", "amazon", "apple tv", "hbo", "paramount",
-            "starz", "cinemax", "showtime", "bluray", "web-dl", "remux", "4k uhd",
-            "new releases", "top picks", "trending"
-        ]
-        if movieGroupKeywords.contains(where: { groupLower.contains($0) }) && !groupLower.contains("live") && !groupLower.contains("sport") && !groupLower.contains("news") {
-            return true
-        }
-
-        // File extension detection anywhere in URL (handles query parameters as well)
-        let fileExtensions = [".mp4", ".mkv", ".avi", ".m4v", ".mov", ".webm", ".wmv", ".flv"]
-        let hasVODExtension = fileExtensions.contains(where: { lowerURL.contains($0) })
-        if hasVODExtension && !groupLower.contains("live") && !groupLower.contains("channel") && !groupLower.contains("sport") && !groupLower.contains("news") {
-            return true
-        }
-
-        // 4-digit release year in name, e.g. "Oppenheimer (2023)" or "Barbie [2023]"
-        if let regex = try? NSRegularExpression(pattern: #"[\(\[]\s*(19\d{2}|20\d{2})\s*[\)\]]"#) {
-            let range = NSRange(name.startIndex..., in: name)
-            if regex.firstMatch(in: name, range: range) != nil {
-                if !groupLower.contains("live") && !groupLower.contains("sport") && !groupLower.contains("news") && !groupLower.contains("channel") {
-                    return true
-                }
-            }
-        }
-
-        return false
-    }
-
-    var isSeries: Bool {
-        if category == .series { return true }
-        let lowerURL = streamURLString.lowercased()
-        if lowerURL.contains("/series/") { return true }
-        let groupLower = group?.lowercased() ?? ""
-        if groupLower.contains("series") || groupLower.contains("season") || groupLower.contains("boxset") || groupLower.contains("tv shows") || groupLower.contains("tv series") {
-            return true
-        }
-        let nameLower = name.lowercased()
-        if nameLower.contains("s01") || nameLower.contains("s02") || nameLower.contains("s03") || nameLower.contains("e01") || nameLower.contains("e02") || nameLower.contains("season ") || nameLower.contains("episode ") {
-            return true
-        }
-        if let regex = try? NSRegularExpression(pattern: #"\b[sS]\d{1,2}\s*[eE]\d{1,2}\b"#) {
-            let range = NSRange(name.startIndex..., in: name)
-            if regex.firstMatch(in: name, range: range) != nil {
-                return true
-            }
-        }
-        return false
-    }
-
-    var isVOD: Bool {
-        isMovie || isSeries
-    }
-}
-
-enum PlaylistError: LocalizedError {
-    case unavailable
-    case noChannels
-    case unauthorized
-
-    var errorDescription: String? {
-        switch self {
-        case .unavailable:
-            return "The playlist could not be downloaded. Check the URL and credentials."
-        case .noChannels:
-            return "No playable channels were found in this playlist."
-        case .unauthorized:
-            return "Authentication failed (401/403). Please verify your username and password."
-        }
-    }
-}
-
-enum PlaylistParser {
-    // Static pre-compiled regular expressions for fast linear-time matching
-    nonisolated private static let prefixRegexes: [NSRegularExpression] = [
-        #"^[A-Za-z]{2,4}\s*[:|\-•/]\s*"#,
-        #"^\[[A-Za-z]{2,4}\]\s*"#,
-        #"^\|[A-Za-z]{2,4}\|\s*"#,
-        #"^(VIP|HD|FHD|4K|RAW)\s*[:|\-•/]\s*"#
-    ].compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
-
-    nonisolated private static let suffixRegexes: [NSRegularExpression] = [
-        #"\s*\((BACKUP|BACK-UP|BACK UP|1080P|720P|50FPS|60FPS|25FPS|HEVC|H265|H\.265|RAW|LOW)\)"#,
-        #"\s*\[(BACKUP|BACK-UP|BACK UP|1080P|720P|50FPS|60FPS|25FPS|HEVC|H265|H\.265|RAW|LOW)\]"#,
-        #"\s+\b(50FPS|60FPS|25FPS|RAW)\b"#
-    ].compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
-
-    nonisolated private static let acronyms: Set<String> = [
-        "UK", "US", "USA", "GB", "CA", "AU", "NZ", "IE", "FR", "DE", "ES", "IT", "NL",
-        "HD", "FHD", "UHD", "4K", "8K", "SD", "HEVC", "H265", "RAW",
-        "TV", "VIP", "PPV", "VOD", "EPG",
-        "BBC", "ITV", "CNN", "HBO", "SKY", "TNT", "ESPN", "NBC", "CBS", "ABC", "FOX", "MTV",
-        "BT", "MLB", "NBA", "NFL", "NHL", "UFC", "WWE", "F1", "FIA"
-    ]
-
-    /// Streams directly from a downloaded file on disk using memory-mapping on a background thread
-    nonisolated static func channels(fromFileURL fileURL: URL) async throws -> [Channel] {
-        return try await Task.detached(priority: .userInitiated) {
-            guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else {
-                throw PlaylistError.unavailable
-            }
-            guard let content = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-                throw PlaylistError.unavailable
-            }
-            return channels(from: content)
-        }.value
-    }
-
-    /// Fast line-by-line enumerator without intermediate array allocation
-    nonisolated static func channels(from playlist: String) -> [Channel] {
-        var channels: [Channel] = []
-        channels.reserveCapacity(min(playlist.count / 80, 50000))
-        var name = ""
-        var group: String?
-        var logoURL: URL?
-
-        playlist.enumerateLines { rawLine, _ in
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty else { return }
-
-            if line.hasPrefix("#EXTINF:") {
-                name = line.split(separator: ",", maxSplits: 1).last.map(String.init) ?? "Untitled Channel"
-                group = attribute(named: "group-title", in: line)
-                logoURL = attribute(named: "tvg-logo", in: line).flatMap(URL.init(string:))
-            } else if !line.hasPrefix("#"), let streamURL = URL(string: line) {
-                let rawName = name.isEmpty ? (streamURL.host ?? "Untitled Channel") : name
-                let cleanedName = cleanSeparators(rawName)
-                let cleanedGroup = group.map(cleanSeparators)
-                let uniform = uniformChannelName(cleanedName)
-                let cat = NetflixCategory.classify(group: cleanedGroup, name: cleanedName)
-
-                channels.append(
-                    Channel(
-                        id: UUID(),
-                        name: cleanedName,
-                        uniformName: uniform,
-                        group: cleanedGroup,
-                        logoURL: logoURL,
-                        streamURL: streamURL,
-                        streamURLString: line,
-                        category: cat
-                    )
-                )
-                name = ""
-                group = nil
-                logoURL = nil
-            }
-        }
-
-        return channels
-    }
-
-    nonisolated static func uniformChannelName(_ raw: String) -> String {
-        var text = cleanSeparators(raw)
-
-        for regex in prefixRegexes {
-            let range = NSRange(text.startIndex..., in: text)
-            text = regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
-        }
-
-        for regex in suffixRegexes {
-            let range = NSRange(text.startIndex..., in: text)
-            text = regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
-        }
-
-        text = text.replacingOccurrences(of: "|", with: " ")
-        while text.contains("  ") {
-            text = text.replacingOccurrences(of: "  ", with: " ")
-        }
-        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        text = text.trimmingCharacters(in: CharacterSet(charactersIn: ":|-•/ "))
-
-        if !text.isEmpty {
-            text = formatComponent(text)
-        }
-
-        return text.isEmpty ? raw : text
-    }
-
-    nonisolated static func cleanSeparators(_ text: String) -> String {
-        guard text.contains(";") else { return text }
-
-        let parts = text
-            .components(separatedBy: ";")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard !parts.isEmpty else { return text }
-
-        return parts
-            .map { formatComponent($0) }
-            .joined(separator: " • ")
-    }
-
-    nonisolated private static func formatComponent(_ text: String) -> String {
-        let words = text.components(separatedBy: .whitespaces)
-        let formattedWords = words.map { word -> String in
-            let upper = word.uppercased()
-
-            if acronyms.contains(upper) {
-                return upper
-            }
-
-            if word.count > 2 && word == upper && word.rangeOfCharacter(from: .letters) != nil {
-                return word.prefix(1).uppercased() + word.dropFirst().lowercased()
-            }
-
-            return word
-        }
-        return formattedWords.joined(separator: " ")
-    }
-
-    nonisolated private static func attribute(named name: String, in line: String) -> String? {
-        let doubleQuoteTarget = name + "=\""
-        if let startRange = line.range(of: doubleQuoteTarget) {
-            let remainder = line[startRange.upperBound...]
-            if let quoteRange = remainder.firstIndex(of: "\"") {
-                return String(remainder[..<quoteRange])
-            }
-        }
-        let singleQuoteTarget = name + "='"
-        if let startRange = line.range(of: singleQuoteTarget) {
-            let remainder = line[startRange.upperBound...]
-            if let quoteRange = remainder.firstIndex(of: "'") {
-                return String(remainder[..<quoteRange])
-            }
-        }
-        return nil
     }
 }
 

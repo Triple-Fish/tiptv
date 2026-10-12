@@ -75,7 +75,7 @@ struct PaywallView: View {
                             .shadow(color: tiptvTheme.accent.opacity(0.4), radius: 14, y: 4)
 
                         HStack(spacing: 6) {
-                            Text("tiptv")
+                            Text("Tiptv")
                                 .font(.system(size: 32, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
 

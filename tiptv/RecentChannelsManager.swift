@@ -3,18 +3,19 @@
 //  tiptv
 //
 
-import Combine
 import Foundation
+import Observation
 import SwiftUI
 
 @MainActor
-final class RecentChannelsManager: ObservableObject {
+@Observable
+final class RecentChannelsManager {
     static let shared = RecentChannelsManager()
 
     private let userDefaultsKey = "tiptv_recent_channel_urls"
     private let maxRecentCount = 10
 
-    @Published private(set) var recentStreamURLs: [String] = []
+    private(set) var recentStreamURLs: [String] = []
 
     init() {
         if let saved = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {

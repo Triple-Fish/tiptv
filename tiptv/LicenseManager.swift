@@ -38,7 +38,11 @@ final class LicenseManager: ObservableObject {
             self.trialStartDate = now
         }
 
-        self.hasPurchasedLicense = UserDefaults.standard.bool(forKey: hasPurchasedLicenseKey)
+        let existingPurchased = UserDefaults.standard.bool(forKey: hasPurchasedLicenseKey)
+        if existingPurchased {
+            UserDefaults.standard.set(true, forKey: hasPurchasedLicenseKey)
+        }
+        self.hasPurchasedLicense = existingPurchased
 
         transactionListenerTask = listenForTransactions()
 

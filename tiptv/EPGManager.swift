@@ -1,13 +1,7 @@
-//
-//  EPGManager.swift
-//  tiptv
-//
-
-import Combine
 import Foundation
-import SwiftUI
+import Observation
 
-struct EPGProgram: Identifiable, Sendable {
+struct EPGProgram: Identifiable, Sendable, Equatable {
     let id: UUID
     let channelId: UUID
     let title: String
@@ -17,184 +11,188 @@ struct EPGProgram: Identifiable, Sendable {
     let startTime: Date
     let endTime: Date
 
-    var isLive: Bool {
-        let now = Date()
-        return now >= startTime && now <= endTime
-    }
+    var isLive: Bool { Date() >= startTime && Date() <= endTime }
 
     var progress: Double {
-        let now = Date()
-        guard now >= startTime else { return 0 }
-        guard now <= endTime else { return 1.0 }
-        let total = endTime.timeIntervalSince(startTime)
-        guard total > 0 else { return 0 }
-        return (now.timeIntervalSince(startTime)) / total
+        let duration = endTime.timeIntervalSince(startTime)
+        guard duration > 0 else { return 0 }
+        return min(1, max(0, Date().timeIntervalSince(startTime) / duration))
     }
 
-    nonisolated private static let timeRangeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
-
     var timeRangeString: String {
-        "\(Self.timeRangeFormatter.string(from: startTime)) - \(Self.timeRangeFormatter.string(from: endTime))"
+        "\(startTime.formatted(date: .omitted, time: .shortened)) – \(endTime.formatted(date: .omitted, time: .shortened))"
     }
 
     var durationString: String {
-        let minutes = Int(endTime.timeIntervalSince(startTime) / 60)
-        let hours = minutes / 60
-        let remainingMinutes = minutes % 60
-        if hours > 0 && remainingMinutes > 0 {
-            return "\(hours)h \(remainingMinutes)m"
-        } else if hours > 0 {
-            return "\(hours)h"
-        } else {
-            return "\(remainingMinutes)m"
-        }
+        Duration.seconds(endTime.timeIntervalSince(startTime)).formatted(.units(allowed: [.hours, .minutes]))
     }
 
     var remainingTimeString: String {
-        let now = Date()
         guard isLive else { return "" }
-        let remainingMinutes = max(1, Int(endTime.timeIntervalSince(now) / 60))
-        if remainingMinutes >= 60 {
-            return "Ends in \(remainingMinutes / 60)h \(remainingMinutes % 60)m"
-        } else {
-            return "Ends in \(remainingMinutes)m"
-        }
+        return "Ends in \(Duration.seconds(endTime.timeIntervalSinceNow).formatted(.units(allowed: [.hours, .minutes])))"
     }
 }
 
 @MainActor
-final class EPGManager: ObservableObject {
+@Observable
+final class EPGManager {
     static let shared = EPGManager()
 
-    private var cache: [UUID: [EPGProgram]] = [:]
+    private(set) var programsByChannelID: [UUID: [EPGProgram]] = [:]
+    private(set) var isLoading = false
+    private(set) var lastUpdated: Date?
+    private(set) var errorMessage: String?
+    private(set) var sourceURL: URL?
 
-    // Predefined schedules per channel genre for realistic EPG display
-    private let sportsTemplates = [
-        ("Premier League Live: Matchday", "Live coverage of top-tier football matches with expert pre-match and post-match analysis.", 120),
-        ("Super Sunday: Analysis & Highlights", "In-depth highlights, goals of the week, and expert studio punditry.", 60),
-        ("Formula 1: Qualifying Session", "Full coverage of the high-octane qualifying shootout ahead of the Grand Prix.", 90),
-        ("Champions League Tonight", "All the goals and key moments from Europe's elite club competition.", 60),
-        ("Live Tennis: Grand Slam Championship", "Center court live tennis action with player interviews and stats.", 150),
-        ("Boxing: World Title Fight Preview", "Exclusive interviews, training camp footage, and breakdown of fight night.", 45),
-        ("SportsCenter Live Bulletin", "Roundup of the latest breaking news, transfer rumors, and scores across global sports.", 30),
-        ("Motorsport Weekly Round", "Highlights and behind-the-scenes access to rally, endurance, and touring car racing.", 45)
-    ]
-
-    private let movieTemplates = [
-        ("The Dark Knight", "When the menace known as the Joker wreaks havoc, Batman must accept one of the greatest psychological tests.", 152),
-        ("Inception", "A thief who steals corporate secrets through dream-sharing technology is given the inverse task of planting an idea.", 148),
-        ("Interstellar", "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival.", 169),
-        ("Gladiator", "A former Roman General sets out to exact vengeance against the corrupt emperor who murdered his family.", 155),
-        ("Blade Runner 2049", "A young blade runner's discovery of a long-buried secret leads him to track down former blade runner Rick Deckard.", 164),
-        ("Pulp Fiction", "The lives of two mob hitmen, a boxer, a gangster and his wife intertwine in four tales of violence and redemption.", 154),
-        ("The Matrix", "When a beautiful stranger leads computer hacker Neo to a forbidding underworld, he discovers the shocking truth.", 136),
-        ("Mad Max: Fury Road", "In a post-apocalyptic wasteland, a woman rebels against a tyrannical ruler in search for her homeland.", 120)
-    ]
-
-    private let newsTemplates = [
-        ("Global News Hour", "Live international headlines, in-depth reports, and live correspondence from global capitals.", 60),
-        ("Prime Time Briefing", "Comprehensive coverage of major political, economic, and social developments.", 60),
-        ("Business & Markets Today", "Real-time market updates, stock indices, corporate earnings, and CEO interviews.", 30),
-        ("World Weather & Climate Special", "Detailed regional weather forecasts and environmental reporting.", 30),
-        ("Breaking News Live", "Fast-moving reporting on the developing top stories around the globe.", 60),
-        ("Investigative Insight", "In-depth documentary series exploring geopolitical conflicts and human stories.", 60)
-    ]
-
-    private let entertainmentTemplates = [
-        ("Late Night Talk Show", "Celebrity guest interviews, comedy monologues, and musical guest performances.", 60),
-        ("The Great Cooking Challenge", "Aspiring chefs face culinary hurdles in front of a panel of world-renowned culinary judges.", 60),
-        ("Mystery Island: Drama Series", "Suspenseful drama series following a community on a remote coastal island.", 45),
-        ("Comedy Central: Stand-Up Special", "Live hilarious comedy special recorded at legendary international venues.", 45),
-        ("Wildlife Planet: Ocean Giants", "Breathtaking 4K nature documentary chronicling the marine wildlife in the deep Pacific.", 60),
-        ("Grand Designs: Modern Architecture", "Ambitious homeowners build unconventional, cutting-edge eco-homes from the ground up.", 60)
-    ]
-
-    private let kidsTemplates = [
-        ("Adventures in Toyland", "Fun-filled animated escapades with magical toys and their friendly companions.", 30),
-        ("Space Explorers: Galactic Rescue", "Young astronauts journey across asteroid belts to solve cosmic mysteries.", 30),
-        ("Dino Academy", "Friendly dinosaurs learn teamwork, friendship, and problem-solving skills.", 30),
-        ("Superhero Pals", "Kid superheroes use clever gadgets and kindness to save their neighborhood.", 30)
-    ]
+    private init() {}
 
     func programs(for channel: Channel, date: Date = Date()) -> [EPGProgram] {
-        if let existing = cache[channel.id], !existing.isEmpty {
-            return existing
-        }
-
-        let generated = generateSchedule(for: channel, baseDate: date)
-        cache[channel.id] = generated
-        return generated
+        programsByChannelID[channel.id] ?? []
     }
 
     func currentProgram(for channel: Channel) -> EPGProgram? {
-        let list = programs(for: channel)
         let now = Date()
-        return list.first { $0.startTime <= now && $0.endTime >= now }
+        return programs(for: channel).first { $0.startTime <= now && $0.endTime >= now }
     }
 
     func nextProgram(for channel: Channel) -> EPGProgram? {
-        let list = programs(for: channel)
         let now = Date()
-        return list.first { $0.startTime > now }
+        return programs(for: channel).first { $0.startTime > now }
     }
 
-    private func generateSchedule(for channel: Channel, baseDate: Date) -> [EPGProgram] {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: baseDate)
-
-        // Select suitable templates based on category
-        let templates: [(String, String, Int)]
-        let cat = channel.category
-        switch cat {
-        case .sports:
-            templates = sportsTemplates
-        case .movies:
-            templates = movieTemplates
-        case .news:
-            templates = newsTemplates
-        case .kids:
-            templates = kidsTemplates
-        default:
-            templates = entertainmentTemplates
+    func load(from url: URL, channels: [Channel], force: Bool = false) async {
+        if !force, sourceURL == url, let lastUpdated, Date().timeIntervalSince(lastUpdated) < 6 * 60 * 60 {
+            return
         }
 
-        var result: [EPGProgram] = []
-        var currentTime = startOfDay.addingTimeInterval(-4 * 3600) // Start 4 hours before today for smooth past browsing
-        let endTimeLimit = startOfDay.addingTimeInterval(28 * 3600) // 4 hours into tomorrow
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
 
-        // Use a hash of channel name to ensure repeatable but varied schedules per channel
-        var templateIndex = abs(channel.name.hashValue) % templates.count
-
-        while currentTime < endTimeLimit {
-            let (title, synopsis, baseMinutes) = templates[templateIndex % templates.count]
-            // Slight jitter based on channel id so different channels don't align identically
-            let durationSeconds = TimeInterval(baseMinutes * 60)
-            let programEnd = currentTime.addingTimeInterval(durationSeconds)
-
-            let program = EPGProgram(
-                id: UUID(),
-                channelId: channel.id,
-                title: title,
-                subtitle: channel.group ?? channel.category.rawValue,
-                synopsis: synopsis,
-                category: channel.category.rawValue,
-                startTime: currentTime,
-                endTime: programEnd
-            )
-
-            result.append(program)
-            currentTime = programEnd
-            templateIndex += 1
+        do {
+            let (temporaryURL, response) = try await URLSession.shared.download(from: url)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw URLError(.badServerResponse)
+            }
+            let parsed = try XMLTVParser.parse(fileURL: temporaryURL, channels: channels)
+            programsByChannelID = parsed
+            sourceURL = url
+            lastUpdated = Date()
+        } catch {
+            errorMessage = "The programme guide could not be loaded. Check the XMLTV URL."
         }
-
-        return result
     }
 
     func clearCache() {
-        cache.removeAll()
+        programsByChannelID.removeAll(keepingCapacity: false)
+        sourceURL = nil
+        lastUpdated = nil
+        errorMessage = nil
+    }
+}
+
+final class XMLTVParser: NSObject, XMLParserDelegate, @unchecked Sendable {
+    private struct RawProgram {
+        let externalChannelID: String
+        let start: Date
+        let stop: Date
+        var title = ""
+        var subtitle: String?
+        var description = ""
+        var category = ""
+    }
+
+    private var channelNames: [String: [String]] = [:]
+    private var rawPrograms: [RawProgram] = []
+    private var currentChannelID: String?
+    private var currentProgram: RawProgram?
+    private var currentElement = ""
+    private var text = ""
+
+    static func parse(fileURL: URL, channels: [Channel]) throws -> [UUID: [EPGProgram]] {
+        guard let parser = XMLParser(contentsOf: fileURL) else { throw URLError(.cannotParseResponse) }
+        let delegate = XMLTVParser()
+        parser.delegate = delegate
+        guard parser.parse() else { throw parser.parserError ?? URLError(.cannotParseResponse) }
+        return delegate.match(channels: channels)
+    }
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+        currentElement = elementName
+        text = ""
+        if elementName == "channel" {
+            currentChannelID = attributeDict["id"]
+        } else if elementName == "programme",
+                  let channel = attributeDict["channel"],
+                  let start = Self.parseDate(attributeDict["start"]),
+                  let stop = Self.parseDate(attributeDict["stop"]) {
+            currentProgram = RawProgram(externalChannelID: channel, start: start, stop: stop)
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) { text += string }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if elementName == "display-name", let currentChannelID, !value.isEmpty {
+            channelNames[currentChannelID, default: []].append(value)
+        } else if currentProgram != nil {
+            switch elementName {
+            case "title": currentProgram?.title = value
+            case "sub-title": currentProgram?.subtitle = value.isEmpty ? nil : value
+            case "desc": currentProgram?.description = value
+            case "category": currentProgram?.category = value
+            case "programme":
+                if let currentProgram, !currentProgram.title.isEmpty { rawPrograms.append(currentProgram) }
+                currentProgram = nil
+            default: break
+            }
+        }
+        if elementName == "channel" { currentChannelID = nil }
+        text = ""
+    }
+
+    private func match(channels: [Channel]) -> [UUID: [EPGProgram]] {
+        var lookup: [String: UUID] = [:]
+        for channel in channels where !channel.isVOD {
+            if let tvgID = channel.tvgID, !tvgID.isEmpty { lookup[Self.key(tvgID)] = channel.id }
+            lookup[Self.key(channel.name)] = channel.id
+            lookup[Self.key(channel.uniformName)] = channel.id
+        }
+        for (externalID, names) in channelNames {
+            if let channelID = lookup[Self.key(externalID)] ?? names.lazy.compactMap({ lookup[Self.key($0)] }).first {
+                lookup[Self.key(externalID)] = channelID
+            }
+        }
+
+        var result: [UUID: [EPGProgram]] = [:]
+        for raw in rawPrograms {
+            guard let channelID = lookup[Self.key(raw.externalChannelID)] else { continue }
+            let stableKey = "\(channelID.uuidString)|\(raw.start.timeIntervalSince1970)|\(raw.title)"
+            result[channelID, default: []].append(EPGProgram(
+                id: Channel.stableID(for: stableKey), channelId: channelID, title: raw.title,
+                subtitle: raw.subtitle, synopsis: raw.description, category: raw.category,
+                startTime: raw.start, endTime: raw.stop
+            ))
+        }
+        for key in result.keys { result[key]?.sort { $0.startTime < $1.startTime } }
+        return result
+    }
+
+    private static func key(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+    }
+
+    private static func parseDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let patterns = ["yyyyMMddHHmmss Z", "yyyyMMddHHmm Z", "yyyyMMddHHmmss", "yyyyMMddHHmm"]
+        for pattern in patterns {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = pattern
+            if let date = formatter.date(from: value) { return date }
+        }
+        return nil
     }
 }

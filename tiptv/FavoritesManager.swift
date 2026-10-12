@@ -3,17 +3,18 @@
 //  tiptv
 //
 
-import Combine
 import Foundation
+import Observation
 import SwiftUI
 
 @MainActor
-final class FavoritesManager: ObservableObject {
+@Observable
+final class FavoritesManager {
     static let shared = FavoritesManager()
 
-    private let userDefaultsKey = "tiptv_favorite_urls"
+    private let userDefaultsKey = "tiptv_favorite_stream_urls"
 
-    @Published private(set) var favoriteStreamURLs: Set<String> = []
+    private(set) var favoriteStreamURLs: Set<String> = []
 
     init() {
         if let saved = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {
@@ -46,8 +47,18 @@ final class FavoritesManager: ObservableObject {
     }
 
     func filterFavorites(from channels: [Channel]) -> [Channel] {
-        if favoriteStreamURLs.isEmpty { return [] }
-        return channels.filter { favoriteStreamURLs.contains($0.streamURLString) }
+        guard !favoriteStreamURLs.isEmpty else { return [] }
+        var result: [Channel] = []
+        result.reserveCapacity(min(favoriteStreamURLs.count, channels.count))
+        for ch in channels {
+            if favoriteStreamURLs.contains(ch.streamURLString) {
+                result.append(ch)
+                if result.count == favoriteStreamURLs.count {
+                    break
+                }
+            }
+        }
+        return result
     }
 
     private func persist() {

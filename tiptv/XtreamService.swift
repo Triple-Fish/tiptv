@@ -84,6 +84,12 @@ enum XtreamService {
                 throw PlaylistError.unavailable
             }
 
+            // Pre-classify known categories once to eliminate 30,000+ regex and string checks
+            var categoryClassificationMap: [String: ChannelCategory] = [:]
+            for (catID, groupName) in categoryMap {
+                categoryClassificationMap[catID] = ChannelCategory.classify(group: groupName, name: groupName)
+            }
+
             var channels: [Channel] = []
             channels.reserveCapacity(streamList.count)
 
@@ -106,6 +112,7 @@ enum XtreamService {
 
                 let catID = String(describing: dict["category_id"] ?? "")
                 let groupName = categoryMap[catID] ?? "Live TV"
+                let resolvedCat = categoryClassificationMap[catID] ?? .other
 
                 let streamURLString = "\(cleanBase)/live/\(username)/\(password)/\(streamID).m3u8"
                 guard let streamURL = URL(string: streamURLString) else {
@@ -115,10 +122,14 @@ enum XtreamService {
                 let channel = Channel(
                     id: UUID(),
                     name: finalName,
+                    uniformName: finalName,
                     group: groupName,
                     logoURL: logoURL,
                     streamURL: streamURL,
-                    streamURLString: streamURLString
+                    streamURLString: streamURLString,
+                    category: resolvedCat,
+                    isMovie: false,
+                    isSeries: false
                 )
                 channels.append(channel)
             }
@@ -154,28 +165,23 @@ enum XtreamService {
             }
         }
 
-        // 2. Fetch VOD streams via download to file (Zero-RAM spike)
-        guard let streamsURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_vod_streams") else {
+        // 2. Fetch VOD streams
+        guard let vodURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_vod_streams") else {
             return []
         }
 
-        var streamRequest = URLRequest(url: streamsURL)
-        streamRequest.timeoutInterval = 45
-        streamRequest.setValue(defaultUserAgent, forHTTPHeaderField: "User-Agent")
+        var vodRequest = URLRequest(url: vodURL)
+        vodRequest.timeoutInterval = 30
+        vodRequest.setValue(defaultUserAgent, forHTTPHeaderField: "User-Agent")
 
-        guard let (tempFileURL, response) = try? await URLSession.shared.download(for: streamRequest),
-              let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            return []
-        }
-        defer { try? FileManager.default.removeItem(at: tempFileURL) }
+        do {
+            let (vodData, response) = try await URLSession.shared.data(for: vodRequest)
+            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                return []
+            }
 
-        return await Task.detached(priority: .userInitiated) {
-            autoreleasepool {
-                guard let inputStream = InputStream(url: tempFileURL) else { return [] }
-                inputStream.open()
-                defer { inputStream.close() }
-
-                guard let streamList = try? JSONSerialization.jsonObject(with: inputStream) as? [[String: Any]] else {
+            return await Task.detached(priority: .userInitiated) {
+                guard let streamList = try? JSONSerialization.jsonObject(with: vodData) as? [[String: Any]] else {
                     return []
                 }
 
@@ -216,14 +222,18 @@ enum XtreamService {
                         logoURL: logoURL,
                         streamURL: streamURL,
                         streamURLString: streamURLString,
-                        category: .movies
+                        category: .movies,
+                        isMovie: true,
+                        isSeries: false
                     )
                     movies.append(channel)
                 }
 
                 return movies
-            }
-        }.value
+            }.value
+        } catch {
+            return []
+        }
     }
 
     /// Fetches all on-demand series from an Xtream Codes server
@@ -248,28 +258,23 @@ enum XtreamService {
             }
         }
 
-        // 2. Fetch series via download to file (Zero-RAM spike)
+        // 2. Fetch series streams
         guard let seriesURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_series") else {
             return []
         }
 
         var seriesRequest = URLRequest(url: seriesURL)
-        seriesRequest.timeoutInterval = 45
+        seriesRequest.timeoutInterval = 30
         seriesRequest.setValue(defaultUserAgent, forHTTPHeaderField: "User-Agent")
 
-        guard let (tempFileURL, response) = try? await URLSession.shared.download(for: seriesRequest),
-              let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            return []
-        }
-        defer { try? FileManager.default.removeItem(at: tempFileURL) }
+        do {
+            let (seriesData, response) = try await URLSession.shared.data(for: seriesRequest)
+            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                return []
+            }
 
-        return await Task.detached(priority: .userInitiated) {
-            autoreleasepool {
-                guard let inputStream = InputStream(url: tempFileURL) else { return [] }
-                inputStream.open()
-                defer { inputStream.close() }
-
-                guard let seriesList = try? JSONSerialization.jsonObject(with: inputStream) as? [[String: Any]] else {
+            return await Task.detached(priority: .userInitiated) {
+                guard let seriesList = try? JSONSerialization.jsonObject(with: seriesData) as? [[String: Any]] else {
                     return []
                 }
 
@@ -309,14 +314,18 @@ enum XtreamService {
                         logoURL: logoURL,
                         streamURL: streamURL,
                         streamURLString: streamURLString,
-                        category: .series
+                        category: .series,
+                        isMovie: false,
+                        isSeries: true
                     )
                     series.append(channel)
                 }
 
                 return series
-            }
-        }.value
+            }.value
+        } catch {
+            return []
+        }
     }
 
     static func cleanBaseURL(_ urlString: String) -> String {
@@ -335,103 +344,99 @@ enum XtreamService {
         return clean
     }
 
-    /// Fetches detailed series info and all episodes by season for an Xtream Codes series
-    static func fetchSeriesInfo(
-        baseURL: String,
-        username: String,
-        password: String,
-        seriesID: String
-    ) async throws -> XtreamSeriesInfo {
+    /// Fetches detailed series metadata including episode list broken down by season
+    static func fetchSeriesInfo(baseURL: String, username: String, password: String, seriesID: String) async -> XtreamSeriesInfo? {
+        guard !username.isEmpty, !password.isEmpty, !seriesID.isEmpty else { return nil }
         let cleanBase = cleanBaseURL(baseURL)
-        guard let url = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_series_info&series_id=\(seriesID)") else {
-            throw PlaylistError.unavailable
+
+        guard let infoURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_series_info&series_id=\(seriesID)") else {
+            return nil
         }
 
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: infoURL)
         request.timeoutInterval = 20
         request.setValue(defaultUserAgent, forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            throw PlaylistError.unavailable
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw PlaylistError.unavailable
-        }
-
-        let infoDict = json["info"] as? [String: Any] ?? [:]
-        let episodesDict = json["episodes"] as? [String: [[String: Any]]] ?? [:]
-
-        let name = (infoDict["name"] as? String) ?? "Series \(seriesID)"
-        let plot = (infoDict["plot"] as? String) ?? (infoDict["description"] as? String)
-        let cast = infoDict["cast"] as? String
-        let director = infoDict["director"] as? String
-        let genre = infoDict["genre"] as? String
-        let releaseDate = (infoDict["release_date"] as? String) ?? (infoDict["releaseDate"] as? String)
-        let rating = String(describing: infoDict["rating"] ?? "")
-        let coverURL = (infoDict["cover"] as? String).flatMap { URL(string: $0) }
-
-        var backdropURL: URL? = nil
-        if let backdrops = infoDict["backdrop_path"] as? [String], let first = backdrops.first {
-            backdropURL = URL(string: first)
-        }
-
-        var episodesBySeason: [Int: [XtreamEpisode]] = [:]
-        var seasonsSet = Set<Int>()
-
-        for (seasonKey, epList) in episodesDict {
-            let seasonNum = Int(seasonKey) ?? 1
-            seasonsSet.insert(seasonNum)
-            var seasonEpisodes: [XtreamEpisode] = []
-
-            for ep in epList {
-                let epID = String(describing: ep["id"] ?? "")
-                guard !epID.isEmpty else { continue }
-
-                let epNum = (ep["episode_num"] as? Int) ?? (Int(String(describing: ep["episode_num"] ?? "1")) ?? 1)
-                let title = (ep["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Episode \(epNum)"
-                let ext = (ep["container_extension"] as? String) ?? "mp4"
-
-                let epInfo = ep["info"] as? [String: Any]
-                let duration = epInfo?["duration"] as? String
-                let epPlot = epInfo?["plot"] as? String
-
-                let streamURLString = "\(cleanBase)/series/\(username)/\(password)/\(epID).\(ext)"
-                guard let streamURL = URL(string: streamURLString) else { continue }
-
-                let episode = XtreamEpisode(
-                    id: epID,
-                    episodeNum: epNum,
-                    title: title,
-                    season: seasonNum,
-                    containerExtension: ext,
-                    duration: duration,
-                    plot: epPlot,
-                    streamURL: streamURL
-                )
-                seasonEpisodes.append(episode)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                return nil
             }
 
-            seasonEpisodes.sort { $0.episodeNum < $1.episodeNum }
-            episodesBySeason[seasonNum] = seasonEpisodes
+            return await Task.detached(priority: .userInitiated) {
+                guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return nil
+                }
+
+                let info = root["info"] as? [String: Any] ?? [:]
+                let name = (info["name"] as? String) ?? "Series Details"
+                let plot = info["plot"] as? String
+                let cast = info["cast"] as? String
+                let director = info["director"] as? String
+                let genre = info["genre"] as? String
+                let releaseDate = info["releaseDate"] as? String
+                let rating = (info["rating"] as? String) ?? ""
+                let coverURL = (info["cover"] as? String).flatMap { URL(string: $0) }
+                let backdropURL = ((info["backdrop_path"] as? [String])?.first).flatMap { URL(string: $0) }
+
+                var episodesBySeason: [Int: [XtreamEpisode]] = [:]
+                var seasonsSet: Set<Int> = []
+
+                if let episodesDict = root["episodes"] as? [String: [[String: Any]]] {
+                    for (seasonKey, epArray) in episodesDict {
+                        guard let seasonNum = Int(seasonKey) else { continue }
+                        seasonsSet.insert(seasonNum)
+                        var seasonEpisodes: [XtreamEpisode] = []
+
+                        for epDict in epArray {
+                            guard let epID = String(describing: epDict["id"] ?? "").nonEmpty else { continue }
+                            let epNum = (epDict["episode_num"] as? Int) ?? (Int(String(describing: epDict["episode_num"] ?? "")) ?? 1)
+                            let title = (epDict["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Episode \(epNum)"
+                            let ext = (epDict["container_extension"] as? String) ?? "mp4"
+                            let epInfo = epDict["info"] as? [String: Any]
+                            let duration = epInfo?["duration"] as? String
+                            let epPlot = epInfo?["plot"] as? String
+
+                            let streamURLString = "\(cleanBase)/series/\(username)/\(password)/\(epID).\(ext)"
+                            guard let streamURL = URL(string: streamURLString) else { continue }
+
+                            let episode = XtreamEpisode(
+                                id: epID,
+                                episodeNum: epNum,
+                                title: title,
+                                season: seasonNum,
+                                containerExtension: ext,
+                                duration: duration,
+                                plot: epPlot,
+                                streamURL: streamURL
+                            )
+                            seasonEpisodes.append(episode)
+                        }
+
+                        seasonEpisodes.sort { $0.episodeNum < $1.episodeNum }
+                        episodesBySeason[seasonNum] = seasonEpisodes
+                    }
+                }
+
+                let sortedSeasons = seasonsSet.sorted()
+
+                return XtreamSeriesInfo(
+                    name: name,
+                    plot: plot,
+                    cast: cast,
+                    director: director,
+                    genre: genre,
+                    releaseDate: releaseDate,
+                    rating: rating.isEmpty ? nil : rating,
+                    coverURL: coverURL,
+                    backdropURL: backdropURL,
+                    seasons: sortedSeasons,
+                    episodesBySeason: episodesBySeason
+                )
+            }.value
+        } catch {
+            return nil
         }
-
-        let sortedSeasons = seasonsSet.sorted()
-
-        return XtreamSeriesInfo(
-            name: name,
-            plot: plot,
-            cast: cast,
-            director: director,
-            genre: genre,
-            releaseDate: releaseDate,
-            rating: rating.isEmpty ? nil : rating,
-            coverURL: coverURL,
-            backdropURL: backdropURL,
-            seasons: sortedSeasons,
-            episodesBySeason: episodesBySeason
-        )
     }
 }
 
@@ -460,4 +465,10 @@ struct XtreamSeriesInfo: Sendable {
     let backdropURL: URL?
     let seasons: [Int]
     let episodesBySeason: [Int: [XtreamEpisode]]
+}
+
+private extension String {
+    nonisolated var nonEmpty: String? {
+        isEmpty ? nil : self
+    }
 }

@@ -3,17 +3,18 @@
 //  tiptv
 //
 
-import Combine
 import Foundation
+import Observation
 import SwiftUI
 
 @MainActor
-final class HiddenChannelsManager: ObservableObject {
+@Observable
+final class HiddenChannelsManager {
     static let shared = HiddenChannelsManager()
 
     private let userDefaultsKey = "tiptv_hidden_channel_urls"
 
-    @Published private(set) var hiddenStreamURLs: Set<String> = []
+    private(set) var hiddenStreamURLs: Set<String> = []
 
     init() {
         if let saved = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {

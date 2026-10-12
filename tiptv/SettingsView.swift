@@ -6,22 +6,35 @@
 import SwiftUI
 
 struct SettingsView: View {
+    private enum SettingsCategory: String, CaseIterable, Identifiable {
+        case playlist = "Playlist"
+        case playback = "Playback"
+        case appearance = "Appearance"
+        case account = "Account"
+        case about = "About"
+        var id: String { rawValue }
+    }
     @Binding var playlistURL: String
     @Binding var username: String
+    @Binding var epgURL: String
     let totalChannels: Int
     let allChannels: [Channel]
     let onReload: () -> Void
     let onDelete: () -> Void
     let onOpenImporter: () -> Void
+    var onSelectProfile: ((PlaylistProfile) -> Void)? = nil
     var onDismiss: (() -> Void)? = nil
 
-    @ObservedObject private var hiddenManager = HiddenChannelsManager.shared
+    @State private var hiddenManager = HiddenChannelsManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var licenseManager = LicenseManager.shared
-    @ObservedObject private var playerEngine = PlayerEngineManager.shared
+    @State private var playerEngine = PlayerEngineManager.shared
+    @State private var profileStore = PlaylistProfileStore.shared
+    @ObservedObject private var seriesPlaybackManager = SeriesPlaybackManager.shared
     @State private var showingDeleteConfirmation = false
     @State private var showingRestoreAllConfirmation = false
     @State private var showingPaywall = false
+    @State private var selectedSettingsCategory: SettingsCategory = .playlist
 
     private var hiddenChannels: [Channel] {
         hiddenManager.filterHidden(from: allChannels)
@@ -31,13 +44,30 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 headerSection
-                licenseSection
-                playlistSection
-                hiddenChannelsSection
-                appearanceSection
-                playbackEngineSection
-                appInfoSection
-                legalSection
+                Section {
+                    Picker("Settings category", selection: $selectedSettingsCategory) {
+                        ForEach(SettingsCategory.allCases) { category in
+                            Text(category.rawValue).tag(category)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                switch selectedSettingsCategory {
+                case .playlist:
+                    playlistSection
+                    profilesSection
+                    hiddenChannelsSection
+                case .playback:
+                    playbackEngineSection
+                    seriesPlaybackSection
+                case .appearance:
+                    appearanceSection
+                case .account:
+                    licenseSection
+                case .about:
+                    appInfoSection
+                    legalSection
+                }
             }
             .scrollContentBackground(.hidden)
             .background(tiptvTheme.contentBackground.ignoresSafeArea())
@@ -101,7 +131,7 @@ struct SettingsView: View {
                     .shadow(color: tiptvTheme.accent.opacity(0.3), radius: 8, y: 2)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("tiptv")
+                    Text("Tiptv")
                         .font(.system(.headline, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
 
@@ -172,7 +202,7 @@ struct SettingsView: View {
         } header: {
             Text("License & Subscription")
         } footer: {
-            Text(licenseManager.hasPurchasedLicense ? "Thank you for supporting tiptv! You have permanent unlimited access." : "Every new user gets 24 hours of free unlimited streaming. After the trial, a one-time purchase unlocks lifetime access.")
+            Text(licenseManager.hasPurchasedLicense ? "Thank you for supporting Tiptv! You have permanent unlimited access." : "Every new user gets 24 hours of free unlimited streaming. After the trial, a one-time purchase unlocks lifetime access.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -199,6 +229,7 @@ struct SettingsView: View {
                 }
 
                 LabeledContent("Total Channels", value: "\(totalChannels)")
+                LabeledContent("Programme Guide", value: epgURL.isEmpty ? "Not configured" : "XMLTV connected")
 
                 Button(action: onReload) {
                     Label("Reload Playlist", systemImage: "arrow.clockwise")
@@ -215,6 +246,45 @@ struct SettingsView: View {
                     Label("Delete Playlist", systemImage: "trash")
                         .foregroundStyle(tiptvTheme.liveRed)
                 }
+            }
+        }
+        .listRowBackground(tiptvTheme.cardBackground)
+    }
+
+    @ViewBuilder
+    private var profilesSection: some View {
+        Section("Playlist Profiles") {
+            if profileStore.profiles.isEmpty {
+                Text("Your first successfully loaded playlist will be saved here.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(profileStore.profiles) { profile in
+                    Button {
+                        onSelectProfile?(profile)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(profile.name).foregroundStyle(.white)
+                                Text(URL(string: profile.playlistURL)?.host ?? profile.playlistURL)
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            if profile.id == profileStore.selectedProfileID {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(tiptvTheme.aqua)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions {
+                        Button(role: .destructive) { profileStore.delete(profile) } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            Button(action: onOpenImporter) {
+                Label("Add Another Playlist", systemImage: "plus.circle")
+                    .foregroundStyle(tiptvTheme.aqua)
             }
         }
         .listRowBackground(tiptvTheme.cardBackground)
@@ -388,9 +458,41 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
+    private var seriesPlaybackSection: some View {
+        Section {
+            Toggle(isOn: $seriesPlaybackManager.isAutoplayEnabled) {
+                HStack(spacing: 12) {
+                    Image(systemName: "forward.end.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(themeManager.accent)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Autoplay Next Episode")
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.white)
+
+                        Text("Automatically play the next episode when current episode ends")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+            }
+            .tint(themeManager.accent)
+        } header: {
+            Text("Series Playback")
+        } footer: {
+            Text("When enabled, a countdown appears at the end of an episode before automatically playing the next one in the series.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .listRowBackground(tiptvTheme.cardBackground)
+    }
+
+    @ViewBuilder
     private var appInfoSection: some View {
         Section("App Information") {
-            LabeledContent("App", value: "tiptv")
+            LabeledContent("App", value: "Tiptv")
             LabeledContent("Version", value: "1.0")
             LabeledContent("Playback Engine", value: playerEngine.enginePreference.title)
             LabeledContent("Theme", value: themeManager.currentTheme.rawValue)
@@ -428,7 +530,7 @@ struct SettingsView: View {
         } header: {
             Text("Legal & Privacy")
         } footer: {
-            Text("tiptv is a media player client and does not provide, host, or bundle any stream content. Users are responsible for supplying their own legally acquired playlists.")
+            Text("Tiptv is a media player client and does not provide, host, or bundle any stream content. Users are responsible for supplying their own legally acquired playlists.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -440,7 +542,7 @@ struct SettingsView: View {
 
 struct HiddenChannelsListView: View {
     let allChannels: [Channel]
-    @ObservedObject private var hiddenManager = HiddenChannelsManager.shared
+    @State private var hiddenManager = HiddenChannelsManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
 
     private var hiddenList: [Channel] {

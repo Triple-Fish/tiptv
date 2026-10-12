@@ -25,6 +25,9 @@ struct tiptvApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    IdleTimerManager.setDisabled(false)
+                }
         }
     }
 }

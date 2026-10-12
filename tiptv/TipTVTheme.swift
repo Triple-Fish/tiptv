@@ -8,7 +8,7 @@ import Foundation
 import SwiftUI
 
 enum AppTheme: String, CaseIterable, Identifiable {
-    case tiptvCyan = "tiptv Teal"
+    case tiptvCyan = "Tiptv Teal"
     case pureOLED = "Pure OLED Dark"
     case midnightEmerald = "Midnight Emerald"
     case cyberSunset = "Cyber Sunset"
@@ -19,7 +19,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .tiptvCyan:
-            return "Vibrant teal & marine sapphire matching tiptv's icon"
+            return "Vibrant teal & marine sapphire matching Tiptv's icon"
         case .pureOLED:
             return "Pitch black with crisp crimson neon for OLED screens"
         case .midnightEmerald:
@@ -34,7 +34,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var accent: Color {
         switch self {
         case .tiptvCyan:
-            return Color(red: 0.26, green: 0.75, blue: 0.85) // Luminous tiptv Icon Teal (#41BED9)
+            return Color(red: 0.082, green: 0.718, blue: 0.757) // Luminous Tiptv Icon Teal (#15B7C1)
         case .pureOLED:
             return Color(red: 0.90, green: 0.08, blue: 0.15) // Neon Crimson
         case .midnightEmerald:
@@ -49,7 +49,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var aqua: Color {
         switch self {
         case .tiptvCyan:
-            return Color(red: 0.32, green: 0.82, blue: 0.89) // Bright Sky Teal (#52D1E3)
+            return Color(red: 0.16, green: 0.80, blue: 0.84) // Bright Sky Teal (#29CCE2)
         case .pureOLED:
             return Color(red: 0.22, green: 0.74, blue: 0.97) // Ice Blue
         case .midnightEmerald:
@@ -122,7 +122,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .pureOLED:
             return Color.white.opacity(0.14)
         case .tiptvCyan:
-            return Color(red: 0.26, green: 0.75, blue: 0.85).opacity(0.22)
+            return Color(red: 0.082, green: 0.718, blue: 0.757).opacity(0.22)
         default:
             return Color.white.opacity(0.10)
         }
@@ -136,7 +136,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
         switch self {
         case .tiptvCyan:
             return LinearGradient(
-                colors: [Color(red: 0.26, green: 0.75, blue: 0.85), Color(red: 0.16, green: 0.48, blue: 0.52)],
+                colors: [Color(red: 0.082, green: 0.718, blue: 0.757), Color(red: 0.06, green: 0.46, blue: 0.50)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -253,7 +253,7 @@ final class ThemeManager: ObservableObject {
     init() {
         let saved = UserDefaults.standard.string(forKey: userDefaultsKey)
         if let saved = saved {
-            if saved == "tiptv Cyan" || saved == "tiptv Teal" {
+            if saved == "tiptv Cyan" || saved == "tiptv Teal" || saved == "Tiptv Teal" {
                 currentTheme = .tiptvCyan
             } else if let theme = AppTheme(rawValue: saved) {
                 currentTheme = theme
@@ -295,7 +295,7 @@ struct tiptvBrandLogo: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Text("t")
+            Text("T")
                 .font(.system(size: size, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
 
@@ -322,7 +322,3 @@ struct tiptvBrandLogo: View {
         }
     }
 }
-
-// MARK: - Compatibility Typealiases
-typealias TipTVTheme = tiptvTheme
-typealias TipTVBrandLogo = tiptvBrandLogo

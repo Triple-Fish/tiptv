@@ -12,8 +12,25 @@ struct MoviesCatalogView: View {
     let items: [Channel]
     let title: String
     var isLoading: Bool = false
+    @Binding var searchText: String
     let onSelectChannel: (Channel) -> Void
     var onReload: (() -> Void)? = nil
+
+    init(
+        items: [Channel],
+        title: String,
+        isLoading: Bool = false,
+        searchText: Binding<String> = .constant(""),
+        onSelectChannel: @escaping (Channel) -> Void,
+        onReload: (() -> Void)? = nil
+    ) {
+        self.items = items
+        self.title = title
+        self.isLoading = isLoading
+        self._searchText = searchText
+        self.onSelectChannel = onSelectChannel
+        self.onReload = onReload
+    }
 
     @ObservedObject private var themeManager = ThemeManager.shared
     enum VideoFormatFilter: String, CaseIterable, Identifiable {
@@ -25,11 +42,10 @@ struct MoviesCatalogView: View {
     }
 
     @AppStorage("playlistURL") private var playlistURL = ""
-    @AppStorage("playlistUsername") private var playlistUsername = ""
-    @AppStorage("playlistPassword") private var playlistPassword = ""
+    @State private var credentials = PlaylistCredentials.shared
+    @State private var continueWatching = ContinueWatchingManager.shared
     @State private var selectedSeries: Channel? = nil
     @State private var selectedFormat: VideoFormatFilter = .all
-    @State private var searchText = ""
     @State private var selectedGroup: String = "All"
     @State private var cachedGroups: [String] = ["All"]
     @State private var displayLimit = 120
@@ -41,13 +57,6 @@ struct MoviesCatalogView: View {
     @State private var filteredItems: [Channel] = []
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var filterTask: Task<Void, Never>?
-
-    private var paginatedFilteredItems: [Channel] {
-        if filteredItems.count <= displayLimit {
-            return filteredItems
-        }
-        return Array(filteredItems.prefix(displayLimit))
-    }
 
     private var featuredItem: Channel? {
         filteredItems.first
@@ -62,23 +71,14 @@ struct MoviesCatalogView: View {
 
         filterTask?.cancel()
         filterTask = Task.detached(priority: .userInitiated) {
-            var result = currentItems
-
-            if isMovies && format != .all {
-                if format == .mp4 {
-                    result = result.filter { $0.streamURLString.lowercased().contains(".mp4") }
-                } else if format == .mkv {
-                    result = result.filter { $0.streamURLString.lowercased().contains(".mkv") }
-                }
-            }
-
-            if grp != "All" {
-                result = result.filter { $0.group == grp }
-            }
-
-            if !q.isEmpty {
-                result = result.filter { $0.searchKey.contains(q) }
-            }
+            let requiredExtension: String? = isMovies && format != .all ? format.rawValue.lowercased() : nil
+            let requiredGroup = grp == "All" ? nil : grp
+            let result = ChannelCatalog.videoChannels(
+                in: currentItems,
+                group: requiredGroup,
+                pathExtension: requiredExtension,
+                query: q
+            )
 
             guard !Task.isCancelled else { return }
 
@@ -101,63 +101,46 @@ struct MoviesCatalogView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 20) {
-                // Top Brand Bar with Count
-                HStack {
-                    tiptvBrandLogo(size: 26)
-
-                    Spacer()
-
-                    if isLoading {
-                        ProgressView()
-                            .tint(themeManager.accent)
-                            .scaleEffect(0.8)
-                            .padding(.trailing, 4)
+                if searchText.isEmpty {
+                    let resumable = continueWatching.entries.filter { entry in
+                        title == "Series" ? entry.channel.isSeries : entry.channel.isMovie
                     }
-
-                    Text("\(title) (\(items.count))")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(themeManager.accent)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(themeManager.accent.opacity(0.12), in: Capsule())
-                        .overlay(
-                            Capsule().strokeBorder(themeManager.accent.opacity(0.25), lineWidth: 0.5)
-                        )
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-
-                // Search Bar
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(themeManager.accent)
-
-                    TextField("Search \(title.lowercased())...", text: $searchText)
-                        .font(.system(size: 13, design: .rounded))
-                        .foregroundStyle(.white)
-.autocorrectionDisabled()
-                        .disableAutocapitalization()
-
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white.opacity(0.5))
+                    if !resumable.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Continue Watching")
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 20)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                LazyHStack(spacing: 12) {
+                                    ForEach(resumable.prefix(12)) { entry in
+                                        Button { onSelectChannel(entry.channel) } label: {
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                MovieArtworkView(
+                                                    logoURL: entry.channel.logoURL,
+                                                    title: entry.channel.uniformName,
+                                                    isSeries: entry.channel.isSeries
+                                                )
+                                                    .frame(width: 150, height: 84)
+                                                    .clipped()
+                                                    .background(Color.white.opacity(0.08))
+                                                ProgressView(value: entry.progress)
+                                                    .tint(themeManager.accent)
+                                                Text(entry.channel.uniformName)
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(.white)
+                                                    .lineLimit(1)
+                                            }
+                                            .frame(width: 150)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                )
-                .padding(.horizontal, 20)
 
                 // Format Filter Bar (Movies only: MP4 direct vs MKV external)
                 if title == "Movies" {
@@ -251,6 +234,15 @@ struct MoviesCatalogView: View {
                         Text("No matching \(title.lowercased()) found")
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white.opacity(0.7))
+
+                        if !searchText.isEmpty {
+                            Button("Clear Search") {
+                                searchText = ""
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(themeManager.accent)
+                            .padding(.top, 4)
+                        }
                     }
                 } else {
                     // Featured Hero Poster Card
@@ -273,7 +265,7 @@ struct MoviesCatalogView: View {
                             ],
                             spacing: 16
                         ) {
-                            ForEach(paginatedFilteredItems) { item in
+                            ForEach(filteredItems.prefix(displayLimit)) { item in
                                 MoviePosterCard(item: item) {
                                     handleItemSelection(item)
                                 }
@@ -301,9 +293,44 @@ struct MoviesCatalogView: View {
                     }
                 }
             }
+            .padding(.top, 12)
             .padding(.bottom, 28)
         }
         .background(tiptvTheme.contentBackground.ignoresSafeArea())
+        .navigationTitle(title)
+        .searchable(text: $searchText, prompt: "Search \(title.lowercased())")
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if isLoading {
+                    ProgressView()
+                        .tint(themeManager.accent)
+                        .scaleEffect(0.8)
+                }
+
+                if !items.isEmpty {
+                    Text("\(items.count)")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(themeManager.accent)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(themeManager.accent.opacity(0.12), in: Capsule())
+                        .overlay(
+                            Capsule().strokeBorder(themeManager.accent.opacity(0.25), lineWidth: 0.5)
+                        )
+                }
+
+                if let onReload {
+                    Button(action: onReload) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.08), in: Circle())
+                    }
+                    .accessibilityLabel("Reload \(title)")
+                }
+            }
+        }
         .task(id: items.count) {
             guard !items.isEmpty else {
                 cachedGroups = ["All"]
@@ -340,8 +367,8 @@ struct MoviesCatalogView: View {
             SeriesDetailView(
                 series: seriesItem,
                 baseURL: playlistURL,
-                username: playlistUsername,
-                password: playlistPassword,
+                username: credentials.username,
+                password: credentials.password,
                 onPlayEpisode: { episodeChannel in
                     selectedSeries = nil
                     onSelectChannel(episodeChannel)
@@ -429,25 +456,49 @@ struct MoviesCatalogView: View {
                     .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
             )
 
-            // Play / View Episodes Button
-            Button {
-                #if canImport(UIKit)
-                Haptics.medium()
-                #endif
-                handleItemSelection(item)
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: title == "Series" ? "list.bullet" : "play.fill")
-                        .font(.system(size: 13, weight: .bold))
-                    Text(title == "Series" ? "View Episodes" : "Play Now")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+            // Play / View Episodes Button & Favorite Button
+            HStack(spacing: 10) {
+                Button {
+                    #if canImport(UIKit)
+                    Haptics.medium()
+                    #endif
+                    handleItemSelection(item)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: title == "Series" ? "list.bullet" : "play.fill")
+                            .font(.system(size: 13, weight: .bold))
+                        Text(title == "Series" ? "View Episodes" : "Play Now")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(themeManager.accent, in: RoundedRectangle(cornerRadius: 12))
                 }
-                .foregroundStyle(.black)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(themeManager.accent, in: RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.plain)
+
+                let isFav = FavoritesManager.shared.isFavorite(item)
+                Button {
+                    #if canImport(UIKit)
+                    Haptics.light()
+                    #endif
+                    withAnimation {
+                        FavoritesManager.shared.toggleFavorite(item)
+                    }
+                } label: {
+                    Image(systemName: isFav ? "heart.fill" : "heart")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(isFav ? tiptvTheme.liveRed : .white)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isFav ? "Remove from Favourites" : "Add to Favourites")
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 20)
     }
@@ -505,6 +556,7 @@ struct SeriesDetailView: View {
     let onDismiss: () -> Void
 
     @ObservedObject private var themeManager = ThemeManager.shared
+    @State private var favoritesManager = FavoritesManager.shared
     @State private var seriesInfo: XtreamSeriesInfo? = nil
     @State private var selectedSeason: Int = 1
     @State private var isLoading: Bool = true
@@ -524,44 +576,48 @@ struct SeriesDetailView: View {
             ZStack {
                 tiptvTheme.contentBackground.ignoresSafeArea()
 
-                if isLoading {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .tint(themeManager.accent)
-                            .scaleEffect(1.2)
-                        Text("Loading series episodes...")
-                            .font(.system(size: 14, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                } else if let error = errorMessage {
-                    VStack(spacing: 16) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.orange)
-                        Text(error)
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Button {
-                            loadEpisodes()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.clockwise")
-                                Text("Retry")
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        // Backdrop Header or Poster Card
+                        headerView
+
+                        if isLoading {
+                            VStack(spacing: 16) {
+                                ProgressView()
+                                    .tint(themeManager.accent)
+                                    .scaleEffect(1.2)
+                                Text("Loading series episodes...")
+                                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.7))
                             }
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(themeManager.accent, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(24)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
-                            // Backdrop Header or Poster Card
-                            headerView
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 36)
+                        } else if let error = errorMessage {
+                            VStack(spacing: 16) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(.orange)
+                                Text(error)
+                                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                Button {
+                                    loadEpisodes()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.clockwise")
+                                        Text("Retry")
+                                    }
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.black)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 10)
+                                    .background(themeManager.accent, in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(24)
+                        } else {
 
                             // Quick Play Episode 1 Button
                             if let firstEp = seriesInfo?.episodesBySeason[seriesInfo?.seasons.first ?? 1]?.first {
@@ -646,13 +702,41 @@ struct SeriesDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(action: onDismiss) {
+                    Button(action: {
+                        IdleTimerManager.setDisabled(false)
+                        onDismiss()
+                    }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 22))
                             .foregroundStyle(.white.opacity(0.6))
                     }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    let isFavorite = favoritesManager.isFavorite(series)
+                    Button {
+                        #if canImport(UIKit)
+                        Haptics.light()
+                        #endif
+                        withAnimation {
+                            favoritesManager.toggleFavorite(series)
+                        }
+                    } label: {
+                        Image(systemName: isFavorite ? "heart.fill" : "heart")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(isFavorite ? tiptvTheme.liveRed : .white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.1), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                }
             }
+        }
+        .onAppear {
+            IdleTimerManager.setDisabled(false)
+        }
+        .onDisappear {
+            IdleTimerManager.setDisabled(false)
         }
         .task {
             loadEpisodes()
@@ -682,10 +766,32 @@ struct SeriesDetailView: View {
 
                 // Info details
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(seriesInfo?.name ?? series.uniformName)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(3)
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(seriesInfo?.name ?? series.uniformName)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineLimit(3)
+
+                        Spacer()
+
+                        let isFavorite = favoritesManager.isFavorite(series)
+                        Button {
+                            #if canImport(UIKit)
+                            Haptics.light()
+                            #endif
+                            withAnimation {
+                                favoritesManager.toggleFavorite(series)
+                            }
+                        } label: {
+                            Image(systemName: isFavorite ? "heart.fill" : "heart")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(isFavorite ? tiptvTheme.liveRed : .white)
+                                .frame(width: 38, height: 38)
+                                .background(Color.white.opacity(0.1), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                    }
 
                     if let genre = seriesInfo?.genre, !genre.isEmpty {
                         Text(genre)
@@ -805,15 +911,15 @@ struct SeriesDetailView: View {
     }
 
     private func playEpisode(_ episode: XtreamEpisode) {
-        let epChannel = Channel(
-            id: UUID(),
-            name: "\(series.uniformName) S\(episode.season)E\(episode.episodeNum): \(episode.title)",
-            uniformName: "\(series.uniformName) S\(episode.season)E\(episode.episodeNum): \(episode.title)",
-            group: series.uniformName,
-            logoURL: seriesInfo?.coverURL ?? series.logoURL,
-            streamURL: episode.streamURL,
-            streamURLString: episode.streamURL.absoluteString,
-            category: .series
+        SeriesPlaybackManager.shared.configureQueue(
+            series: series,
+            seriesInfo: seriesInfo,
+            startingWith: episode
+        )
+        let epChannel = SeriesPlaybackManager.shared.channel(
+            for: episode,
+            series: series,
+            coverURL: seriesInfo?.coverURL
         )
         onPlayEpisode(epChannel)
     }
@@ -822,23 +928,19 @@ struct SeriesDetailView: View {
         isLoading = true
         errorMessage = nil
         Task {
-            do {
-                let info = try await XtreamService.fetchSeriesInfo(
-                    baseURL: baseURL,
-                    username: username,
-                    password: password,
-                    seriesID: seriesID
-                )
-                await MainActor.run {
-                    self.seriesInfo = info
-                    self.selectedSeason = info.seasons.first ?? 1
-                    self.isLoading = false
-                }
-            } catch {
-                await MainActor.run {
+            let info = await XtreamService.fetchSeriesInfo(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+                seriesID: seriesID
+            )
+            await MainActor.run {
+                self.seriesInfo = info
+                self.selectedSeason = info?.seasons.first ?? 1
+                if info == nil {
                     self.errorMessage = "Failed to load episodes. Please check your connection."
-                    self.isLoading = false
                 }
+                self.isLoading = false
             }
         }
     }
@@ -851,6 +953,7 @@ struct MoviePosterCard: View {
     let item: Channel
     let onSelect: () -> Void
     @ObservedObject private var themeManager = ThemeManager.shared
+    @State private var favoritesManager = FavoritesManager.shared
 
     private var isMP4: Bool {
         item.streamURLString.lowercased().contains(".mp4")
@@ -894,6 +997,16 @@ struct MoviePosterCard: View {
                         )
                         .padding(6)
                 }
+                .overlay(alignment: .topLeading) {
+                    if favoritesManager.isFavorite(item) {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(tiptvTheme.liveRed)
+                            .padding(5)
+                            .background(Color.black.opacity(0.65), in: Circle())
+                            .padding(6)
+                    }
+                }
 
                 Text(item.uniformName)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -915,6 +1028,19 @@ struct MoviePosterCard: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            let isFav = favoritesManager.isFavorite(item)
+            Button(role: isFav ? .destructive : nil) {
+                #if canImport(UIKit)
+                Haptics.light()
+                #endif
+                withAnimation {
+                    favoritesManager.toggleFavorite(item)
+                }
+            } label: {
+                Label(isFav ? "Remove from Favourites" : "Add to Favourites", systemImage: isFav ? "heart.slash" : "heart.fill")
+            }
+        }
     }
 }
 

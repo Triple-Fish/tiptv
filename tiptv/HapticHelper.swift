@@ -29,6 +29,17 @@ enum Haptics {
     }
 }
 
+@MainActor
+enum IdleTimerManager {
+    static func setDisabled(_ disabled: Bool) {
+        #if canImport(UIKit)
+        if UIApplication.shared.isIdleTimerDisabled != disabled {
+            UIApplication.shared.isIdleTimerDisabled = disabled
+        }
+        #endif
+    }
+}
+
 extension View {
     @ViewBuilder
     func inlineNavigationBarTitle() -> some View {

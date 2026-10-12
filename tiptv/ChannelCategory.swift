@@ -1,11 +1,11 @@
 //
-//  NetflixCategory.swift
+//  ChannelCategory.swift
 //  tiptv
 //
 
 import Foundation
 
-enum NetflixCategory: String, CaseIterable, Identifiable, Sendable {
+enum ChannelCategory: String, CaseIterable, Identifiable, Sendable, Codable {
     case all = "All"
     case favorites = "Favorites"
     case sports = "Sports"
@@ -83,53 +83,79 @@ enum NetflixCategory: String, CaseIterable, Identifiable, Sendable {
         "c4", "channel 5", "c5", "sky max", "sky showcase", "sky atlantic"
     ]
 
-/// Intelligently classifies any channel into a high level content category
-    /// based on its playlist group and channel title.
-    nonisolated static func classify(group: String?, name: String) -> NetflixCategory {
+    nonisolated private static let seriesClassifierRegex = try? NSRegularExpression(pattern: #"\\b[sS]\d{1,2}\s*[eE]\d{1,2}\b|\bseason\s*\d+\b"#)
+
+    // Memoized cache for playlist group classifications (typically 30-100 unique groups across 50,000 channels)
+    nonisolated(unsafe) private static let groupClassificationCache = NSCache<NSString, NSString>()
+
+    /// Intelligently classifies any channel into a high level content category
+    /// based on its playlist group and channel title with ultra-fast group memoization.
+    nonisolated static func classify(group: String?, name: String) -> ChannelCategory {
+        // 1. Check if group alone uniquely identifies the category (95%+ of IPTV channels)
+        if let group, !group.isEmpty {
+            let nsGroup = group as NSString
+            if let cached = groupClassificationCache.object(forKey: nsGroup) {
+                if let cat = ChannelCategory(rawValue: cached as String) {
+                    return cat
+                }
+            }
+
+            let gLower = group.lowercased()
+            let matchedCategory: ChannelCategory? = {
+                if sportsKeywords.contains(where: { gLower.contains($0) }) { return .sports }
+                if seriesKeywords.contains(where: { gLower.contains($0) }) { return .series }
+                if movieKeywords.contains(where: { gLower.contains($0) }) { return .movies }
+                if newsKeywords.contains(where: { gLower.contains($0) }) { return .news }
+                if kidsKeywords.contains(where: { gLower.contains($0) }) { return .kids }
+                if docKeywords.contains(where: { gLower.contains($0) }) { return .documentaries }
+                if musicKeywords.contains(where: { gLower.contains($0) }) { return .music }
+                if entertainmentKeywords.contains(where: { gLower.contains($0) }) { return .entertainment }
+                return nil
+            }()
+
+            if let matched = matchedCategory {
+                groupClassificationCache.setObject(matched.rawValue as NSString, forKey: nsGroup)
+                return matched
+            }
+        }
+
+        // 2. Fallback to combined group + channel title inspection
         let combined = "\(group ?? "") \(name)".lowercased()
 
-        // 1. Sports
         if sportsKeywords.contains(where: { combined.contains($0) }) {
             return .sports
         }
 
-        // 2. Series & TV Shows
         if seriesKeywords.contains(where: { combined.contains($0) }) {
             return .series
         }
-        if let regex = try? NSRegularExpression(pattern: #"\b[sS]\d{1,2}\s*[eE]\d{1,2}\b|\bseason\s*\d+\b"#) {
+        if let regex = seriesClassifierRegex {
             let range = NSRange(name.startIndex..., in: name)
             if regex.firstMatch(in: name, range: range) != nil {
                 return .series
             }
         }
 
-        // 3. Movies & Cinema
         if movieKeywords.contains(where: { combined.contains($0) }) {
             return .movies
         }
 
-        // 4. News
         if newsKeywords.contains(where: { combined.contains($0) }) {
             return .news
         }
 
-        // 5. Kids & Family
         if kidsKeywords.contains(where: { combined.contains($0) }) {
             return .kids
         }
 
-        // 6. Documentaries & Nature
         if docKeywords.contains(where: { combined.contains($0) }) {
             return .documentaries
         }
 
-        // 7. Music
         if musicKeywords.contains(where: { combined.contains($0) }) {
             return .music
         }
 
-        // 8. Entertainment
         if entertainmentKeywords.contains(where: { combined.contains($0) }) {
             return .entertainment
         }

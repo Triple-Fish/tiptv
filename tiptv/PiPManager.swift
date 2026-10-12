@@ -44,7 +44,15 @@ final class PiPManager: NSObject, ObservableObject, AVPictureInPictureController
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         #endif
         self.pipController = controller
-        self.isPiPPossible = controller.isPictureInPicturePossible
+        let possible = controller.isPictureInPicturePossible
+        if self.isPiPPossible != possible {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.isPiPPossible != possible {
+                    self.isPiPPossible = possible
+                }
+            }
+        }
     }
 
     func togglePiP() {
@@ -133,29 +141,24 @@ final class PlayerUIView: UIView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        playerLayer.frame = bounds
-    }
 }
 #elseif canImport(AppKit)
 struct PiPVideoPlayer: NSViewRepresentable {
     let player: AVPlayer
     var isAspectFill: Bool = false
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        let playerLayer = AVPlayerLayer(player: player)
-        playerLayer.videoGravity = isAspectFill ? .resizeAspectFill : .resizeAspect
-        view.wantsLayer = true
-        view.layer = playerLayer
-        PiPManager.shared.setup(with: playerLayer)
+    func makeNSView(context: Context) -> PlayerNSView {
+        let view = PlayerNSView()
+        if let playerLayer = view.playerLayer {
+            playerLayer.player = player
+            playerLayer.videoGravity = isAspectFill ? .resizeAspectFill : .resizeAspect
+            PiPManager.shared.setup(with: playerLayer)
+        }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        if let playerLayer = nsView.layer as? AVPlayerLayer {
+    func updateNSView(_ nsView: PlayerNSView, context: Context) {
+        if let playerLayer = nsView.playerLayer {
             if playerLayer.player !== player {
                 playerLayer.player = player
                 PiPManager.shared.setup(with: playerLayer)
@@ -164,10 +167,28 @@ struct PiPVideoPlayer: NSViewRepresentable {
         }
     }
 
-    static func dismantleNSView(_ nsView: NSView, coordinator: ()) {
-        if let playerLayer = nsView.layer as? AVPlayerLayer {
-            playerLayer.player = nil
-        }
+    static func dismantleNSView(_ nsView: PlayerNSView, coordinator: ()) {
+        nsView.playerLayer?.player = nil
+    }
+}
+
+final class PlayerNSView: NSView {
+    override func makeBackingLayer() -> CALayer {
+        AVPlayerLayer()
+    }
+
+    var playerLayer: AVPlayerLayer? {
+        layer as? AVPlayerLayer
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .never
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 #endif

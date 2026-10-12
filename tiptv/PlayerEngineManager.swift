@@ -3,14 +3,15 @@
 //  tiptv
 //
 
-import Combine
 import Foundation
+import Observation
 import SwiftUI
 
 /// Manages playback engine selection and automatic fallback for channels
 /// where native AVPlayer plays audio-only due to unsupported broadcast video codecs (e.g. MPEG-2, TS).
 @MainActor
-final class PlayerEngineManager: ObservableObject {
+@Observable
+final class PlayerEngineManager {
     static let shared = PlayerEngineManager()
 
     enum EnginePreference: String, CaseIterable, Identifiable {
@@ -44,17 +45,17 @@ final class PlayerEngineManager: ObservableObject {
     private let legacyCacheKey = "channelsRequiringFFmpegCache"
     private let cacheKey = "channelsRequiringFFmpegCache_v2"
 
-    @Published var enginePreference: EnginePreference {
+    var enginePreference: EnginePreference {
         didSet {
             UserDefaults.standard.set(enginePreference.rawValue, forKey: prefKey)
         }
     }
 
     /// Set of stream URLs that were detected as sound-only / MPEG-2 and require the FFmpeg engine.
-    @Published private(set) var channelsRequiringFFmpeg: Set<String> = []
+    private(set) var channelsRequiringFFmpeg: Set<String> = []
 
     /// Transient overrides during session (e.g. user manually toggled engine for current channel)
-    @Published private var sessionEngineOverrides: [UUID: Bool] = [:]
+    private var sessionEngineOverrides: [UUID: Bool] = [:]
 
     private init() {
         // Purge legacy poisoned cache where healthy streams were incorrectly recorded

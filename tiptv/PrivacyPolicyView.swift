@@ -23,7 +23,7 @@ struct PrivacyPolicyView: View {
                                 .font(.system(.headline, design: .rounded).weight(.bold))
                                 .foregroundStyle(.white)
 
-                            Text("tiptv is designed from the ground up to respect your privacy. We collect zero personal data.")
+                            Text("Tiptv is designed from the ground up to respect your privacy. We collect zero personal data.")
                                 .font(.system(.subheadline, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.75))
                         }
@@ -37,7 +37,7 @@ struct PrivacyPolicyView: View {
                 PrivacyPolicyItem(
                     icon: "hand.raised.slash.fill",
                     title: "No Data Collection",
-                    description: "tiptv does not collect, track, transmit, or sell any personal information, usage analytics, advertising identifiers, or browsing habits. We have no user accounts or tracking servers."
+                    description: "Tiptv does not collect, track, transmit, or sell any personal information, usage analytics, advertising identifiers, or browsing habits. We have no user accounts or tracking servers."
                 )
 
                 PrivacyPolicyItem(
@@ -49,7 +49,7 @@ struct PrivacyPolicyView: View {
                 PrivacyPolicyItem(
                     icon: "network",
                     title: "Direct Streaming Connections",
-                    description: "When streaming video or fetching EPG data, the app connects directly to the IPTV provider or server specified by you. No media traffic or credentials pass through any intermediate servers operated by tiptv."
+                    description: "When streaming video or fetching EPG data, the app connects directly to the IPTV provider or server specified by you. No media traffic or credentials pass through any intermediate servers operated by Tiptv."
                 )
             }
             .listRowBackground(tiptvTheme.cardBackground)
@@ -58,20 +58,20 @@ struct PrivacyPolicyView: View {
                 PrivacyPolicyItem(
                     icon: "creditcard.fill",
                     title: "In-App Purchases",
-                    description: "All purchases and subscriptions are handled securely through Apple's App Store and StoreKit. tiptv never receives, processes, or stores your credit card or billing details."
+                    description: "All purchases and subscriptions are handled securely through Apple's App Store and StoreKit. Tiptv never receives, processes, or stores your credit card or billing details."
                 )
 
                 PrivacyPolicyItem(
                     icon: "shield.lefthalf.filled",
                     title: "No Third-Party Analytics",
-                    description: "tiptv contains no third-party tracking libraries, advertising SDKs, or remote analytics frameworks. We respect your network bandwidth and battery life."
+                    description: "Tiptv contains no third-party tracking libraries, advertising SDKs, or remote analytics frameworks. We respect your network bandwidth and battery life."
                 )
             }
             .listRowBackground(tiptvTheme.cardBackground)
 
             Section("Content Responsibility") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("tiptv is strictly a media player application. It does not provide, distribute, host, or sell any streams, channels, or media content. Users are solely responsible for ensuring they possess the appropriate rights to any playlists or content they access.")
+                    Text("Tiptv is strictly a media player application. It does not provide, distribute, host, or sell any streams, channels, or media content. Users are solely responsible for ensuring they possess the appropriate rights to any playlists or content they access.")
                         .font(.system(.footnote, design: .rounded))
                         .foregroundStyle(.white.opacity(0.75))
                         .lineSpacing(3)
