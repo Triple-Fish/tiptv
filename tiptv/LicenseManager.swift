@@ -39,9 +39,6 @@ final class LicenseManager: ObservableObject {
         }
 
         let existingPurchased = UserDefaults.standard.bool(forKey: hasPurchasedLicenseKey)
-        if existingPurchased {
-            UserDefaults.standard.set(true, forKey: hasPurchasedLicenseKey)
-        }
         self.hasPurchasedLicense = existingPurchased
 
         transactionListenerTask = listenForTransactions()
@@ -171,6 +168,8 @@ final class LicenseManager: ObservableObject {
                 }
             }
         }
+        self.hasPurchasedLicense = false
+        UserDefaults.standard.set(false, forKey: hasPurchasedLicenseKey)
     }
 
     private func listenForTransactions() -> Task<Void, Never> {
@@ -179,9 +178,10 @@ final class LicenseManager: ObservableObject {
                 if case .verified(let transaction) = result {
                     await transaction.finish()
                     await MainActor.run {
-                        if transaction.productID == Self.lifetimeProductID && transaction.revocationDate == nil {
-                            self.hasPurchasedLicense = true
-                            UserDefaults.standard.set(true, forKey: self.hasPurchasedLicenseKey)
+                        if transaction.productID == Self.lifetimeProductID {
+                            let isActive = transaction.revocationDate == nil
+                            self.hasPurchasedLicense = isActive
+                            UserDefaults.standard.set(isActive, forKey: self.hasPurchasedLicenseKey)
                         }
                     }
                 }

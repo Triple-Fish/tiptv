@@ -316,15 +316,22 @@ struct MoviesCatalogView: View {
                 return
             }
 
-            let (sortedGroups, initialFiltered) = await Task.detached(priority: .userInitiated) {
+            let work = Task.detached(priority: .userInitiated) {
                 var groups = Set<String>()
-                for item in items {
+                for (index, item) in items.enumerated() {
+                    if index.isMultiple(of: 1_000), Task.isCancelled { return (["All"], [Channel]()) }
                     if let group = item.group, !group.isEmpty {
                         groups.insert(group)
                     }
                 }
                 return (["All"] + groups.sorted(), items)
-            }.value
+            }
+            let (sortedGroups, initialFiltered) = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
+            guard !Task.isCancelled else { return }
 
             cachedGroups = sortedGroups
             if selectedGroup == "All" && selectedFormat == .all {

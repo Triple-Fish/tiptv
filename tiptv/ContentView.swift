@@ -1703,6 +1703,7 @@ struct FullScreenPlayerView: View {
     @State private var isScrubbing = false
     @State private var scrubTime: Double = 0
     @State private var timeObserverToken: Any? = nil
+    @State private var timeObserverPlayer: AVPlayer?
     @State private var playbackRate: Float = 1.0
 
     // Audio / Subtitles & Sleep Timer
@@ -1821,7 +1822,13 @@ struct FullScreenPlayerView: View {
         .onChange(of: channel.id) { _, _ in
             updateCurrentIndex()
             if isFFmpegActive {
+                removeTimeObserver()
                 mkvCoordinator.resetPlayer()
+            }
+        }
+        .onChange(of: player?.currentItem) { _, _ in
+            if !isFFmpegActive && isVODContent {
+                setupTimeObserver()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: AVPlayerItem.playbackStalledNotification)) { notification in
@@ -1836,6 +1843,8 @@ struct FullScreenPlayerView: View {
                 mkvCoordinator.playerLayer?.pause()
                 mkvCoordinator.resetPlayer()
             }
+            mkvCoordinator.onPlay = nil
+            mkvCoordinator.onStateChanged = nil
             removeTimeObserver()
             controlsTimerTask?.cancel()
             sleepTimerManager.cancel()
@@ -2379,6 +2388,8 @@ struct FullScreenPlayerView: View {
 
     private func setupTimeObserver() {
         guard let player else { return }
+        removeTimeObserver()
+        timeObserverPlayer = player
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak player] time in
             guard let player else { return }
@@ -2396,9 +2407,10 @@ struct FullScreenPlayerView: View {
 
     private func removeTimeObserver() {
         if let token = timeObserverToken {
-            player?.removeTimeObserver(token)
+            timeObserverPlayer?.removeTimeObserver(token)
             timeObserverToken = nil
         }
+        timeObserverPlayer = nil
     }
 
     private func seek(to seconds: Double) {

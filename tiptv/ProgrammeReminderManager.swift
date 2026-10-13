@@ -8,7 +8,9 @@ final class ProgrammeReminderManager {
     static let shared = ProgrammeReminderManager()
 
     private(set) var reminderIDs: Set<UUID> = []
-    private init() {}
+    private init() {
+        Task { await restorePendingReminders() }
+    }
 
     func hasReminder(for program: EPGProgram) -> Bool { reminderIDs.contains(program.id) }
 
@@ -43,5 +45,10 @@ final class ProgrammeReminderManager {
             try await center.add(request)
             reminderIDs.insert(program.id)
         } catch { }
+    }
+
+    private func restorePendingReminders() async {
+        let requests = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        reminderIDs = Set(requests.compactMap { UUID(uuidString: $0.identifier) })
     }
 }

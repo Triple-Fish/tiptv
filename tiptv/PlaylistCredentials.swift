@@ -8,12 +8,14 @@ final class PlaylistCredentials {
     static let shared = PlaylistCredentials()
 
     var username: String {
-        didSet { KeychainCredentialStore.set(username, account: .username) }
+        didSet { scheduleGlobalPersistence() }
     }
 
     var password: String {
-        didSet { KeychainCredentialStore.set(password, account: .password) }
+        didSet { scheduleGlobalPersistence() }
     }
+
+    private var persistenceTask: Task<Void, Never>?
 
     private init() {
         let defaults = UserDefaults.standard
@@ -30,20 +32,49 @@ final class PlaylistCredentials {
     }
 
     func clear() {
+        persistenceTask?.cancel()
         username = ""
         password = ""
+        persistenceTask?.cancel()
+        persistenceTask = nil
+        persistGlobalCredentials()
     }
 
     func savePassword(for profileID: UUID) {
+        persistenceTask?.cancel()
+        persistenceTask = nil
+        persistGlobalCredentials()
         KeychainCredentialStore.set(password, accountName: "playlist.password.\(profileID.uuidString)")
     }
 
     func loadPassword(for profileID: UUID) {
         password = KeychainCredentialStore.value(accountName: "playlist.password.\(profileID.uuidString)") ?? ""
+        persistenceTask?.cancel()
+        persistenceTask = nil
+        persistGlobalCredentials()
     }
 
     func deletePassword(for profileID: UUID) {
         KeychainCredentialStore.set("", accountName: "playlist.password.\(profileID.uuidString)")
+    }
+
+    private func scheduleGlobalPersistence() {
+        persistenceTask?.cancel()
+        persistenceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.persistGlobalCredentials()
+            self.persistenceTask = nil
+        }
+    }
+
+    private func persistGlobalCredentials() {
+        KeychainCredentialStore.set(username, account: .username)
+        KeychainCredentialStore.set(password, account: .password)
     }
 }
 

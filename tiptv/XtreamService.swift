@@ -12,7 +12,7 @@ enum XtreamService {
     static func isXtreamServer(baseURL: String, username: String, password: String) async -> Bool {
         guard !username.isEmpty, !password.isEmpty else { return false }
         let cleanBase = cleanBaseURL(baseURL)
-        guard let url = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)") else {
+        guard let url = apiURL(cleanBase: cleanBase, username: username, password: password) else {
             return false
         }
 
@@ -42,7 +42,7 @@ enum XtreamService {
 
         // 1. Fetch categories
         var categoryMap: [String: String] = [:]
-        if let catURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_live_categories") {
+        if let catURL = apiURL(cleanBase: cleanBase, username: username, password: password, action: "get_live_categories") {
             var catRequest = URLRequest(url: catURL)
             catRequest.timeoutInterval = 15
             catRequest.setValue(defaultUserAgent, forHTTPHeaderField: "User-Agent")
@@ -58,7 +58,7 @@ enum XtreamService {
         }
 
         // 2. Fetch live streams
-        guard let streamsURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_live_streams") else {
+        guard let streamsURL = apiURL(cleanBase: cleanBase, username: username, password: password, action: "get_live_streams") else {
             throw PlaylistError.unavailable
         }
 
@@ -79,21 +79,23 @@ enum XtreamService {
             throw PlaylistError.unavailable
         }
 
-        return try await Task.detached(priority: .userInitiated) {
+        let categories = categoryMap
+        return try await cancellableDetached {
             guard let streamList = try? JSONSerialization.jsonObject(with: streamData) as? [[String: Any]] else {
                 throw PlaylistError.unavailable
             }
 
             // Pre-classify known categories once to eliminate 30,000+ regex and string checks
             var categoryClassificationMap: [String: ChannelCategory] = [:]
-            for (catID, groupName) in categoryMap {
+            for (catID, groupName) in categories {
                 categoryClassificationMap[catID] = ChannelCategory.classify(group: groupName, name: groupName)
             }
 
             var channels: [Channel] = []
             channels.reserveCapacity(streamList.count)
 
-            for dict in streamList {
+            for (index, dict) in streamList.enumerated() {
+                if index.isMultiple(of: 1_000) { try Task.checkCancellation() }
                 let streamID: String
                 if let idInt = dict["stream_id"] as? Int {
                     streamID = String(idInt)
@@ -111,13 +113,13 @@ enum XtreamService {
                 let logoURL = iconURLString.flatMap { URL(string: $0) }
 
                 let catID = String(describing: dict["category_id"] ?? "")
-                let groupName = categoryMap[catID] ?? "Live TV"
+                let groupName = categories[catID] ?? "Live TV"
                 let resolvedCat = categoryClassificationMap[catID] ?? .other
 
-                let streamURLString = "\(cleanBase)/live/\(username)/\(password)/\(streamID).m3u8"
-                guard let streamURL = URL(string: streamURLString) else {
+                guard let streamURL = streamURL(cleanBase: cleanBase, kind: "live", username: username, password: password, fileName: "\(streamID).m3u8") else {
                     continue
                 }
+                let streamURLString = streamURL.absoluteString
 
                 let channel = Channel(
                     name: finalName,
@@ -138,7 +140,7 @@ enum XtreamService {
             }
 
             return channels
-        }.value
+        }
     }
 
 
@@ -149,7 +151,7 @@ enum XtreamService {
 
         // 1. Fetch VOD categories
         var categoryMap: [String: String] = [:]
-        if let catURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_vod_categories") {
+        if let catURL = apiURL(cleanBase: cleanBase, username: username, password: password, action: "get_vod_categories") {
             var catRequest = URLRequest(url: catURL)
             catRequest.timeoutInterval = 15
             catRequest.setValue(defaultUserAgent, forHTTPHeaderField: "User-Agent")
@@ -165,7 +167,7 @@ enum XtreamService {
         }
 
         // 2. Fetch VOD streams
-        guard let vodURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_vod_streams") else {
+        guard let vodURL = apiURL(cleanBase: cleanBase, username: username, password: password, action: "get_vod_streams") else {
             return []
         }
 
@@ -179,7 +181,8 @@ enum XtreamService {
                 return []
             }
 
-            return await Task.detached(priority: .userInitiated) {
+            let categories = categoryMap
+            return try await cancellableDetached {
                 guard let streamList = try? JSONSerialization.jsonObject(with: vodData) as? [[String: Any]] else {
                     return []
                 }
@@ -187,7 +190,8 @@ enum XtreamService {
                 var movies: [Channel] = []
                 movies.reserveCapacity(streamList.count)
 
-                for dict in streamList {
+                for (index, dict) in streamList.enumerated() {
+                    if index.isMultiple(of: 1_000) { try Task.checkCancellation() }
                     let streamID: String
                     if let idInt = dict["stream_id"] as? Int {
                         streamID = String(idInt)
@@ -205,13 +209,13 @@ enum XtreamService {
                     let logoURL = iconURLString.flatMap { URL(string: $0) }
 
                     let catID = String(describing: dict["category_id"] ?? "")
-                    let groupName = categoryMap[catID] ?? "Movies"
+                    let groupName = categories[catID] ?? "Movies"
                     let ext = (dict["container_extension"] as? String) ?? "mp4"
 
-                    let streamURLString = "\(cleanBase)/movie/\(username)/\(password)/\(streamID).\(ext)"
-                    guard let streamURL = URL(string: streamURLString) else {
+                    guard let streamURL = streamURL(cleanBase: cleanBase, kind: "movie", username: username, password: password, fileName: "\(streamID).\(ext)") else {
                         continue
                     }
+                    let streamURLString = streamURL.absoluteString
 
                     let channel = Channel(
                     name: finalName,
@@ -228,7 +232,7 @@ enum XtreamService {
                 }
 
                 return movies
-            }.value
+            }
         } catch {
             return []
         }
@@ -241,7 +245,7 @@ enum XtreamService {
 
         // 1. Fetch series categories
         var categoryMap: [String: String] = [:]
-        if let catURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_series_categories") {
+        if let catURL = apiURL(cleanBase: cleanBase, username: username, password: password, action: "get_series_categories") {
             var catRequest = URLRequest(url: catURL)
             catRequest.timeoutInterval = 15
             catRequest.setValue(defaultUserAgent, forHTTPHeaderField: "User-Agent")
@@ -257,7 +261,7 @@ enum XtreamService {
         }
 
         // 2. Fetch series streams
-        guard let seriesURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_series") else {
+        guard let seriesURL = apiURL(cleanBase: cleanBase, username: username, password: password, action: "get_series") else {
             return []
         }
 
@@ -271,7 +275,8 @@ enum XtreamService {
                 return []
             }
 
-            return await Task.detached(priority: .userInitiated) {
+            let categories = categoryMap
+            return try await cancellableDetached {
                 guard let seriesList = try? JSONSerialization.jsonObject(with: seriesData) as? [[String: Any]] else {
                     return []
                 }
@@ -279,7 +284,8 @@ enum XtreamService {
                 var series: [Channel] = []
                 series.reserveCapacity(seriesList.count)
 
-                for dict in seriesList {
+                for (index, dict) in seriesList.enumerated() {
+                    if index.isMultiple(of: 1_000) { try Task.checkCancellation() }
                     let seriesID: String
                     if let idInt = dict["series_id"] as? Int {
                         seriesID = String(idInt)
@@ -297,12 +303,12 @@ enum XtreamService {
                     let logoURL = iconURLString.flatMap { URL(string: $0) }
 
                     let catID = String(describing: dict["category_id"] ?? "")
-                    let groupName = categoryMap[catID] ?? "Series"
+                    let groupName = categories[catID] ?? "Series"
 
-                    let streamURLString = "\(cleanBase)/series/\(username)/\(password)/\(seriesID).mp4"
-                    guard let streamURL = URL(string: streamURLString) else {
+                    guard let streamURL = streamURL(cleanBase: cleanBase, kind: "series", username: username, password: password, fileName: "\(seriesID).mp4") else {
                         continue
                     }
+                    let streamURLString = streamURL.absoluteString
 
                     let channel = Channel(
                     name: finalName,
@@ -319,9 +325,53 @@ enum XtreamService {
                 }
 
                 return series
-            }.value
+            }
         } catch {
             return []
+        }
+    }
+
+    nonisolated private static func cancellableDetached<Value: Sendable>(
+        operation: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        let task = Task.detached(priority: .userInitiated, operation: operation)
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    nonisolated private static func apiURL(
+        cleanBase: String,
+        username: String,
+        password: String,
+        action: String? = nil,
+        additionalQueryItems: [URLQueryItem] = []
+    ) -> URL? {
+        guard var components = URLComponents(string: "\(cleanBase)/player_api.php") else { return nil }
+        var queryItems = [
+            URLQueryItem(name: "username", value: username),
+            URLQueryItem(name: "password", value: password)
+        ]
+        if let action {
+            queryItems.append(URLQueryItem(name: "action", value: action))
+        }
+        queryItems.append(contentsOf: additionalQueryItems)
+        components.queryItems = queryItems
+        return components.url
+    }
+
+    nonisolated private static func streamURL(
+        cleanBase: String,
+        kind: String,
+        username: String,
+        password: String,
+        fileName: String
+    ) -> URL? {
+        guard let baseURL = URL(string: cleanBase) else { return nil }
+        return [kind, username, password, fileName].reduce(baseURL) { url, component in
+            url.appendingPathComponent(component)
         }
     }
 
@@ -346,7 +396,13 @@ enum XtreamService {
         guard !username.isEmpty, !password.isEmpty, !seriesID.isEmpty else { return nil }
         let cleanBase = cleanBaseURL(baseURL)
 
-        guard let infoURL = URL(string: "\(cleanBase)/player_api.php?username=\(username)&password=\(password)&action=get_series_info&series_id=\(seriesID)") else {
+        guard let infoURL = apiURL(
+            cleanBase: cleanBase,
+            username: username,
+            password: password,
+            action: "get_series_info",
+            additionalQueryItems: [URLQueryItem(name: "series_id", value: seriesID)]
+        ) else {
             return nil
         }
 
@@ -360,7 +416,7 @@ enum XtreamService {
                 return nil
             }
 
-            return await Task.detached(priority: .userInitiated) {
+            return try await cancellableDetached {
                 guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     return nil
                 }
@@ -380,12 +436,15 @@ enum XtreamService {
                 var seasonsSet: Set<Int> = []
 
                 if let episodesDict = root["episodes"] as? [String: [[String: Any]]] {
-                    for (seasonKey, epArray) in episodesDict {
+                    for (seasonIndex, season) in episodesDict.enumerated() {
+                        if seasonIndex.isMultiple(of: 100) { try Task.checkCancellation() }
+                        let (seasonKey, epArray) = season
                         guard let seasonNum = Int(seasonKey) else { continue }
                         seasonsSet.insert(seasonNum)
                         var seasonEpisodes: [XtreamEpisode] = []
 
-                        for epDict in epArray {
+                        for (episodeIndex, epDict) in epArray.enumerated() {
+                            if episodeIndex.isMultiple(of: 1_000) { try Task.checkCancellation() }
                             guard let epID = String(describing: epDict["id"] ?? "").nonEmpty else { continue }
                             let epNum = (epDict["episode_num"] as? Int) ?? (Int(String(describing: epDict["episode_num"] ?? "")) ?? 1)
                             let title = (epDict["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Episode \(epNum)"
@@ -394,8 +453,7 @@ enum XtreamService {
                             let duration = epInfo?["duration"] as? String
                             let epPlot = epInfo?["plot"] as? String
 
-                            let streamURLString = "\(cleanBase)/series/\(username)/\(password)/\(epID).\(ext)"
-                            guard let streamURL = URL(string: streamURLString) else { continue }
+                            guard let streamURL = streamURL(cleanBase: cleanBase, kind: "series", username: username, password: password, fileName: "\(epID).\(ext)") else { continue }
 
                             let episode = XtreamEpisode(
                                 id: epID,
@@ -430,7 +488,7 @@ enum XtreamService {
                     seasons: sortedSeasons,
                     episodesBySeason: episodesBySeason
                 )
-            }.value
+            }
         } catch {
             return nil
         }

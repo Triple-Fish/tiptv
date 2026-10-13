@@ -165,14 +165,26 @@ private struct EPGSourcePickerView: View {
             }
             let sources = epgManager.sourceChannels
             let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            filteredSources = await Task.detached(priority: .userInitiated) {
+            let work = Task.detached(priority: .userInitiated) {
                 guard !search.isEmpty else { return sources }
-                return sources.filter {
-                    $0.displayName.localizedCaseInsensitiveContains(search)
-                        || $0.id.localizedCaseInsensitiveContains(search)
-                        || $0.aliases.contains { $0.localizedCaseInsensitiveContains(search) }
+                var matches: [EPGSourceChannel] = []
+                for (index, source) in sources.enumerated() {
+                    if index.isMultiple(of: 1_000), Task.isCancelled { return [] }
+                    if source.displayName.localizedCaseInsensitiveContains(search)
+                        || source.id.localizedCaseInsensitiveContains(search)
+                        || source.aliases.contains(where: { $0.localizedCaseInsensitiveContains(search) }) {
+                        matches.append(source)
+                    }
                 }
-            }.value
+                return matches
+            }
+            let matches = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            filteredSources = matches
         }
     }
 }
