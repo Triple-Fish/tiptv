@@ -41,10 +41,17 @@ enum ActiveSheet: Identifiable {
     }
 }
 
+private struct ChannelCatalogSnapshot: Sendable {
+    let visibleChannels: [Channel]
+    let filteredChannels: [Channel]
+    let categoryCounts: [ChannelCategory: Int]
+    let availableCategories: [ChannelCategory]
+}
+
 struct ContentView: View {
     @AppStorage("playlistURL") private var playlistURL = ""
-    @AppStorage("playlistUsername") private var playlistUsername = ""
-    @AppStorage("playlistPassword") private var playlistPassword = ""
+    @State private var credentials = PlaylistCredentials.shared
+    @State private var profileStore = PlaylistProfileStore.shared
     @AppStorage("epgURL") private var epgURL = ""
     @State private var favoritesManager = FavoritesManager.shared
     @State private var hiddenChannelsManager = HiddenChannelsManager.shared
@@ -81,74 +88,85 @@ struct ContentView: View {
     @State private var availableCategories: [ChannelCategory] = [.all]
     @State private var filteredChannels: [Channel] = []
     @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var catalogRefreshTask: Task<Void, Never>?
+    @State private var channelFilterTask: Task<Void, Never>?
 
     private func updateVisibleChannels() {
-        let hidden = hiddenChannelsManager.hiddenStreamURLs
-        if hidden.isEmpty {
-            visibleChannels = channels
-        } else {
-            visibleChannels = channels.filter { !hidden.contains($0.streamURLString) }
-        }
-        updateCategoryState()
-        updateFilteredChannels()
-    }
+        catalogRefreshTask?.cancel()
+        let currentChannels = channels
+        let hiddenURLs = hiddenChannelsManager.hiddenStreamURLs
+        let favoriteURLs = favoritesManager.favoriteStreamURLs
+        let category = selectedCategory
+        let query = searchText
 
-    private func updateCategoryState() {
-        var counts: [ChannelCategory: Int] = [.all: visibleChannels.count]
-        var favCount = 0
-        let favURLs = favoritesManager.favoriteStreamURLs
-        var presentCats = Set<ChannelCategory>()
+        catalogRefreshTask = Task {
+            let snapshot = await Task.detached(priority: .userInitiated) {
+                let visible = ChannelCatalog.visibleChannels(
+                    in: currentChannels,
+                    hiddenStreamURLs: hiddenURLs
+                )
 
-        for ch in visibleChannels {
-            let cat = ch.category
-            counts[cat, default: 0] += 1
-            presentCats.insert(cat)
-            if favURLs.contains(ch.streamURLString) {
-                favCount += 1
-            }
-        }
-        counts[.favorites] = favCount
+                var counts: [ChannelCategory: Int] = [.all: visible.count]
+                var favoriteCount = 0
+                var presentCategories = Set<ChannelCategory>()
+                for channel in visible {
+                    counts[channel.category, default: 0] += 1
+                    presentCategories.insert(channel.category)
+                    if favoriteURLs.contains(channel.streamURLString) {
+                        favoriteCount += 1
+                    }
+                }
+                counts[.favorites] = favoriteCount
 
-        var categories: [ChannelCategory] = [.all]
-        if favCount > 0 {
-            categories.append(.favorites)
+                var categories: [ChannelCategory] = [.all]
+                if favoriteCount > 0 {
+                    categories.append(.favorites)
+                }
+                for item in ChannelCategory.allCases where item != .all && item != .favorites {
+                    if presentCategories.contains(item) {
+                        categories.append(item)
+                    }
+                }
+
+                let filtered = ChannelCatalog.filteredChannels(
+                    in: visible,
+                    category: category,
+                    favoriteStreamURLs: favoriteURLs,
+                    query: query
+                )
+                return ChannelCatalogSnapshot(
+                    visibleChannels: visible,
+                    filteredChannels: filtered,
+                    categoryCounts: counts,
+                    availableCategories: categories
+                )
+            }.value
+
+            guard !Task.isCancelled else { return }
+            visibleChannels = snapshot.visibleChannels
+            filteredChannels = snapshot.filteredChannels
+            categoryCounts = snapshot.categoryCounts
+            availableCategories = snapshot.availableCategories
         }
-        for cat in ChannelCategory.allCases where cat != .all && cat != .favorites {
-            if presentCats.contains(cat) {
-                categories.append(cat)
-            }
-        }
-        categoryCounts = counts
-        availableCategories = categories
     }
 
     private func updateFilteredChannels() {
-        let baseList: [Channel]
-        if selectedCategory == .all {
-            baseList = visibleChannels
-        } else if selectedCategory == .favorites {
-            let favURLs = favoritesManager.favoriteStreamURLs
-            baseList = visibleChannels.filter { favURLs.contains($0.streamURLString) }
-        } else {
-            let cat = selectedCategory
-            baseList = visibleChannels.filter { $0.category == cat }
-        }
-
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else {
-            filteredChannels = baseList
-            return
-        }
-
-        if baseList.count > 2500 {
-            Task.detached(priority: .userInitiated) {
-                let filtered = baseList.filter { $0.searchKey.contains(q) }
-                await MainActor.run {
-                    self.filteredChannels = filtered
-                }
-            }
-        } else {
-            filteredChannels = baseList.filter { $0.searchKey.contains(q) }
+        channelFilterTask?.cancel()
+        let currentChannels = visibleChannels
+        let category = selectedCategory
+        let favoriteURLs = favoritesManager.favoriteStreamURLs
+        let query = searchText
+        channelFilterTask = Task {
+            let filtered = await Task.detached(priority: .userInitiated) {
+                ChannelCatalog.filteredChannels(
+                    in: currentChannels,
+                    category: category,
+                    favoriteStreamURLs: favoriteURLs,
+                    query: query
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            filteredChannels = filtered
         }
     }
 
@@ -280,7 +298,7 @@ struct ContentView: View {
                 NavigationStack {
                     SettingsView(
                         playlistURL: $playlistURL,
-                        username: $playlistUsername,
+                        username: $credentials.username,
                         epgURL: $epgURL,
                         totalChannels: visibleChannels.count,
                         allChannels: channels,
@@ -295,7 +313,8 @@ struct ContentView: View {
                         },
                         onOpenImporter: {
                             activeSheet = .playlistImport
-                        }
+                        },
+                        onSelectProfile: selectProfile
                     )
                     .inlineNavigationBarTitle()
                     .toolbar {
@@ -316,8 +335,8 @@ struct ContentView: View {
             case .playlistImport:
                 PlaylistImportView(
                     playlistURL: $playlistURL,
-                    username: $playlistUsername,
-                    password: $playlistPassword,
+                    username: $credentials.username,
+                    password: $credentials.password,
                     isLoading: isLoadingPlaylist,
                     message: playlistMessage,
                     loadPlaylist: {
@@ -335,7 +354,9 @@ struct ContentView: View {
         }
         .task {
             guard channels.isEmpty, !playlistURL.isEmpty else { return }
-            await loadPlaylist()
+            if await restoreCachedContent() == false {
+                await loadPlaylist()
+            }
         }
         .tint(themeManager.accent)
         .preferredColorScheme(.dark)
@@ -355,13 +376,15 @@ struct ContentView: View {
             queueSearchFilter()
         }
         .onChange(of: favoritesManager.favoriteStreamURLs) { _, _ in
-            updateCategoryState()
-            if selectedCategory == .favorites {
-                updateFilteredChannels()
-            }
+            updateVisibleChannels()
         }
         .onChange(of: hiddenChannelsManager.hiddenStreamURLs) { _, _ in
             updateVisibleChannels()
+        }
+        .onDisappear {
+            catalogRefreshTask?.cancel()
+            searchDebounceTask?.cancel()
+            channelFilterTask?.cancel()
         }
     }
 
@@ -413,7 +436,7 @@ struct ContentView: View {
                     },
                     onReload: {
                         Task {
-                            await loadVODContent()
+                            await loadVODContent(forceRefresh: true)
                         }
                     }
                 )
@@ -430,7 +453,7 @@ struct ContentView: View {
                     onSelectChannel: selectChannel,
                     onReload: {
                         Task {
-                            await loadVODContent()
+                            await loadVODContent(forceRefresh: true)
                         }
                     }
                 )
@@ -444,8 +467,8 @@ struct ContentView: View {
                     movies: movies,
                     series: series,
                     baseURL: playlistURL,
-                    username: playlistUsername,
-                    password: playlistPassword,
+                    username: credentials.username,
+                    password: credentials.password,
                     searchText: $favoritesSearchText,
                     onSelectChannel: selectChannel,
                     onSelectMovie: { movieItem in
@@ -461,7 +484,7 @@ struct ContentView: View {
         case .more:
             SettingsView(
                 playlistURL: $playlistURL,
-                username: $playlistUsername,
+                username: $credentials.username,
                 epgURL: $epgURL,
                 totalChannels: visibleChannels.count,
                 allChannels: channels,
@@ -471,7 +494,8 @@ struct ContentView: View {
                     }
                 },
                 onDelete: deletePlaylist,
-                onOpenImporter: { activeSheet = .playlistImport }
+                onOpenImporter: { activeSheet = .playlistImport },
+                onSelectProfile: selectProfile
             )
             .padding(.bottom, 68)
         }
@@ -852,12 +876,23 @@ struct ContentView: View {
         isPresentingFullScreenPlayer = false
     }
 
-    private func loadVODContent() async {
+    private func loadVODContent(forceRefresh: Bool = false) async {
         guard !isLoadingVOD else { return }
         isLoadingVOD = true
         defer { isLoadingVOD = false }
 
-        guard !playlistUsername.isEmpty && !playlistPassword.isEmpty else {
+        if !forceRefresh {
+            async let cachedMovies = PlaylistCacheManager.shared.loadCachedMovies(for: playlistCacheKey)
+            async let cachedSeries = PlaylistCacheManager.shared.loadCachedSeries(for: playlistCacheKey)
+            if let cachedMovieItems = await cachedMovies,
+               let cachedSeriesItems = await cachedSeries {
+                movies = cachedMovieItems
+                series = cachedSeriesItems
+                return
+            }
+        }
+
+        guard !credentials.username.isEmpty && !credentials.password.isEmpty else {
             let currentChannels = channels
             let (m, s) = await Task.detached(priority: .userInitiated) {
                 let movies = currentChannels.filter { ch in
@@ -897,16 +932,20 @@ struct ContentView: View {
             }.value
             self.movies = m
             self.series = s
+            await PlaylistCacheManager.shared.saveMovies(m, for: playlistCacheKey)
+            await PlaylistCacheManager.shared.saveSeries(s, for: playlistCacheKey)
             return
         }
 
         // Fetch movies first and update UI immediately so user gets content right away
-        let m = await XtreamService.fetchXtreamVOD(baseURL: playlistURL, username: playlistUsername, password: playlistPassword)
+        let m = await XtreamService.fetchXtreamVOD(baseURL: playlistURL, username: credentials.username, password: credentials.password)
         self.movies = m
+        await PlaylistCacheManager.shared.saveMovies(m, for: playlistCacheKey)
 
         // Then fetch series sequentially to prevent simultaneous RAM spikes
-        let s = await XtreamService.fetchXtreamSeries(baseURL: playlistURL, username: playlistUsername, password: playlistPassword)
+        let s = await XtreamService.fetchXtreamSeries(baseURL: playlistURL, username: credentials.username, password: credentials.password)
         self.series = s
+        await PlaylistCacheManager.shared.saveSeries(s, for: playlistCacheKey)
     }
 
     private func loadPlaylist() async {
@@ -920,26 +959,28 @@ struct ContentView: View {
 
         do {
             // 1. Check if this is an Xtream Codes server (server URL + username + password)
-            if !playlistUsername.isEmpty && !playlistPassword.isEmpty {
+            if !credentials.username.isEmpty && !credentials.password.isEmpty {
                 let isXtream = await XtreamService.isXtreamServer(
                     baseURL: playlistURL,
-                    username: playlistUsername,
-                    password: playlistPassword
+                    username: credentials.username,
+                    password: credentials.password
                 )
                 if isXtream {
                     let xtreamChannels = try await XtreamService.fetchXtreamChannels(
                         baseURL: playlistURL,
-                        username: playlistUsername,
-                        password: playlistPassword
+                        username: credentials.username,
+                        password: credentials.password
                     )
                     channels = xtreamChannels
                     updateVisibleChannels()
                     selectedCategory = .all
                     playlistMessage = "\(xtreamChannels.count) channels loaded."
+                    await PlaylistCacheManager.shared.saveChannels(xtreamChannels, for: playlistCacheKey)
+                    persistCurrentProfile()
                     activeSheet = nil
                     isLoadingPlaylist = false
                     Task {
-                        await loadVODContent()
+                        await loadVODContent(forceRefresh: true)
                     }
                     return
                 }
@@ -950,8 +991,8 @@ struct ContentView: View {
             request.timeoutInterval = 45
             request.setValue(XtreamService.defaultUserAgent, forHTTPHeaderField: "User-Agent")
 
-            if !playlistUsername.isEmpty || !playlistPassword.isEmpty {
-                let credentialString = "\(playlistUsername):\(playlistPassword)"
+            if !credentials.username.isEmpty || !credentials.password.isEmpty {
+                let credentialString = "\(credentials.username):\(credentials.password)"
                 if let credentialData = credentialString.data(using: .utf8) {
                     let base64Credential = credentialData.base64EncodedString()
                     request.setValue("Basic \(base64Credential)", forHTTPHeaderField: "Authorization")
@@ -982,6 +1023,8 @@ struct ContentView: View {
             updateVisibleChannels()
             selectedCategory = .all
             playlistMessage = "\(importedChannels.count) channels loaded."
+            await PlaylistCacheManager.shared.saveChannels(importedChannels, for: playlistCacheKey)
+            persistCurrentProfile()
             activeSheet = nil
         } catch {
             playlistMessage = error.localizedDescription
@@ -992,9 +1035,23 @@ struct ContentView: View {
 
     private func deletePlaylist() {
         stopPlayback()
-        playlistURL = ""
-        playlistUsername = ""
-        playlistPassword = ""
+        let deletedCacheKey = playlistCacheKey
+        let deletedProfileID = profileStore.selectedProfileID
+        profileStore.deleteSelected()
+        if let deletedProfileID {
+            credentials.deletePassword(for: deletedProfileID)
+        }
+
+        if let replacement = profileStore.selectedProfile {
+            playlistURL = replacement.playlistURL
+            epgURL = replacement.epgURL
+            credentials.username = replacement.username
+            credentials.loadPassword(for: replacement.id)
+        } else {
+            playlistURL = ""
+            epgURL = ""
+            credentials.clear()
+        }
         channels = []
         updateVisibleChannels()
         movies = []
@@ -1007,6 +1064,70 @@ struct ContentView: View {
         seriesSearchText = ""
         favoritesSearchText = ""
         playlistMessage = nil
+        Task {
+            await PlaylistCacheManager.shared.clear(for: deletedCacheKey)
+            if profileStore.selectedProfile != nil {
+                if await restoreCachedContent() == false {
+                    await loadPlaylist()
+                }
+            }
+        }
+    }
+
+    private func restoreCachedContent() async -> Bool {
+        guard let cachedChannels = await PlaylistCacheManager.shared.loadCachedChannels(for: playlistCacheKey),
+              !cachedChannels.isEmpty else {
+            return false
+        }
+
+        channels = cachedChannels
+        updateVisibleChannels()
+        selectedCategory = .all
+        playlistMessage = "\(cachedChannels.count) cached channels loaded."
+
+        async let cachedMovies = PlaylistCacheManager.shared.loadCachedMovies(for: playlistCacheKey)
+        async let cachedSeries = PlaylistCacheManager.shared.loadCachedSeries(for: playlistCacheKey)
+        movies = await cachedMovies ?? []
+        series = await cachedSeries ?? []
+        return true
+    }
+
+    private func persistCurrentProfile() {
+        let profile: PlaylistProfile
+        if let selected = profileStore.selectedProfile,
+           selected.playlistURL == playlistURL {
+            profileStore.updateSelected(
+                playlistURL: playlistURL,
+                username: credentials.username,
+                epgURL: epgURL
+            )
+            profile = profileStore.selectedProfile ?? selected
+        } else {
+            profile = profileStore.save(
+                name: URL(string: playlistURL)?.host ?? "My Playlist",
+                playlistURL: playlistURL,
+                username: credentials.username,
+                epgURL: epgURL
+            )
+        }
+        credentials.savePassword(for: profile.id)
+    }
+
+    private func selectProfile(_ profile: PlaylistProfile) {
+        profileStore.select(profile)
+        playlistURL = profile.playlistURL
+        epgURL = profile.epgURL
+        credentials.username = profile.username
+        credentials.loadPassword(for: profile.id)
+        channels = []
+        movies = []
+        series = []
+        updateVisibleChannels()
+        Task {
+            if await restoreCachedContent() == false {
+                await loadPlaylist()
+            }
+        }
     }
 
     private var validatedPlaylistURL: URL? {
@@ -1018,6 +1139,10 @@ struct ContentView: View {
 
         return url
     }
+
+    private var playlistCacheKey: String {
+        "\(playlistURL)|\(credentials.username)"
+    }
 }
 
 // MARK: - Custom Bottom Tab Bar
@@ -1027,7 +1152,7 @@ struct BottomTabBar: View {
     let onSelectTab: (AppTab) -> Void
 
     var body: some View {
-        HStack {
+        HStack(spacing: 4) {
             ForEach(AppTab.allCases) { tab in
                 let isSelected = tab == selectedTab
                 Button {
@@ -1044,25 +1169,31 @@ struct BottomTabBar: View {
                             .foregroundStyle(isSelected ? tiptvTheme.accent : .white.opacity(0.45))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 10)
-                    .padding(.bottom, 22)
+                    .padding(.vertical, 9)
+                    .background(
+                        isSelected ? tiptvTheme.accent.opacity(0.16) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    )
                 }
                 .buttonStyle(.plain)
             }
         }
+        .padding(5)
         .background(
             ZStack {
-                Rectangle()
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(.ultraThinMaterial)
                 Color.black.opacity(0.7)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.white.opacity(0.08))
-                    .frame(height: 0.5)
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
             }
-            .ignoresSafeArea(edges: .bottom)
+            .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
         )
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
     }
 }
 
@@ -1084,6 +1215,7 @@ struct ChannelLibraryView: View {
 
     @State private var favoritesManager = FavoritesManager.shared
     @State private var isShowingDeleteConfirmation = false
+    @State private var isShowingTimelineGuide = false
     @State private var displayLimit = 250
 
     private var paginatedChannels: [Channel] {
@@ -1095,6 +1227,11 @@ struct ChannelLibraryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ChannelLibraryDashboard(totalChannelCount: totalChannelCount)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
             // Floating Netflix-Style Category Filter Pills
             if categories.count > 1 {
                 CategoryPillsBar(
@@ -1237,6 +1374,19 @@ struct ChannelLibraryView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if totalChannelCount > 0 {
+                    Button {
+                        isShowingTimelineGuide = true
+                    } label: {
+                        Image(systemName: "calendar.day.timeline.leading")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(tiptvTheme.accent)
+                            .frame(width: 32, height: 32)
+                            .background(tiptvTheme.accent.opacity(0.12), in: Circle())
+                    }
+                    .accessibilityLabel("Open Timeline Guide")
+                }
+
+                if totalChannelCount > 0 {
                     Menu {
                         Button(action: reloadPlaylist) {
                             Label("Reload Channels", systemImage: "arrow.clockwise")
@@ -1284,6 +1434,63 @@ struct ChannelLibraryView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will remove the saved playlist URL and credentials, and clear all channels.")
+        }
+        .sheet(isPresented: $isShowingTimelineGuide) {
+            NavigationStack {
+                TimelineGuideView(
+                    channels: channels,
+                    onSelectChannel: { channel in
+                        isShowingTimelineGuide = false
+                        onSelectChannel(channel)
+                    }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            isShowingTimelineGuide = false
+                        }
+                    }
+                }
+            }
+            .preferredColorScheme(.dark)
+        }
+    }
+}
+
+private struct ChannelLibraryDashboard: View {
+    let totalChannelCount: Int
+
+    var body: some View {
+        HStack(spacing: 14) {
+            tiptvBrandLogo(size: 24)
+                .accessibilityLabel("Tiptv")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your TV, all in one place")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Text(totalChannelCount == 0 ? "Add a playlist to get started" : "\(totalChannelCount.formatted()) channels ready")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+
+            Spacer()
+
+            if totalChannelCount > 0 {
+                Label("LIVE", systemImage: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .foregroundStyle(tiptvTheme.liveRed)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(tiptvTheme.liveRed.opacity(0.12), in: Capsule())
+            }
+        }
+        .padding(14)
+        .background(tiptvTheme.cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(tiptvTheme.cardBorder, lineWidth: 0.5)
         }
     }
 }

@@ -134,6 +134,12 @@ actor PlaylistCacheManager {
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
 
+    func clear(for urlString: String) {
+        try? FileManager.default.removeItem(at: channelsURL(for: urlString))
+        try? FileManager.default.removeItem(at: moviesURL(for: urlString))
+        try? FileManager.default.removeItem(at: seriesURL(for: urlString))
+    }
+
     private func makeEnvelope(_ channels: [Channel]) -> CacheEnvelope {
         CacheEnvelope(
             formatVersion: cacheFormatVersion,

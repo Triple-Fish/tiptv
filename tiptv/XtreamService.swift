@@ -120,7 +120,6 @@ enum XtreamService {
                 }
 
                 let channel = Channel(
-                    id: UUID(),
                     name: finalName,
                     uniformName: finalName,
                     group: groupName,
@@ -215,8 +214,7 @@ enum XtreamService {
                     }
 
                     let channel = Channel(
-                        id: UUID(),
-                        name: finalName,
+                    name: finalName,
                         uniformName: finalName,
                         group: groupName,
                         logoURL: logoURL,
@@ -307,8 +305,7 @@ enum XtreamService {
                     }
 
                     let channel = Channel(
-                        id: UUID(),
-                        name: finalName,
+                    name: finalName,
                         uniformName: finalName,
                         group: groupName,
                         logoURL: logoURL,

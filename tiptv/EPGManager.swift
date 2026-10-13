@@ -74,7 +74,9 @@ final class EPGManager {
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 throw URLError(.badServerResponse)
             }
-            let parsed = try XMLTVParser.parse(fileURL: temporaryURL, channels: channels)
+            let parsed = try await Task.detached(priority: .userInitiated) {
+                try XMLTVParser.parse(fileURL: temporaryURL, channels: channels)
+            }.value
             programsByChannelID = parsed
             sourceURL = url
             lastUpdated = Date()
@@ -91,7 +93,7 @@ final class EPGManager {
     }
 }
 
-final class XMLTVParser: NSObject, XMLParserDelegate, @unchecked Sendable {
+nonisolated final class XMLTVParser: NSObject, XMLParserDelegate, @unchecked Sendable {
     private struct RawProgram {
         let externalChannelID: String
         let start: Date
@@ -109,7 +111,7 @@ final class XMLTVParser: NSObject, XMLParserDelegate, @unchecked Sendable {
     private var currentElement = ""
     private var text = ""
 
-    static func parse(fileURL: URL, channels: [Channel]) throws -> [UUID: [EPGProgram]] {
+    nonisolated static func parse(fileURL: URL, channels: [Channel]) throws -> [UUID: [EPGProgram]] {
         guard let parser = XMLParser(contentsOf: fileURL) else { throw URLError(.cannotParseResponse) }
         let delegate = XMLTVParser()
         parser.delegate = delegate

@@ -85,6 +85,11 @@ final class PlaylistProfileStore {
         persist()
     }
 
+    func deleteSelected() {
+        guard let selectedProfile else { return }
+        delete(selectedProfile)
+    }
+
     private func persist() {
         if let data = try? JSONEncoder().encode(profiles) {
             UserDefaults.standard.set(data, forKey: profilesKey)

@@ -26,8 +26,6 @@ final class PlaylistCredentials {
         if !legacyUsername.isEmpty || !legacyPassword.isEmpty {
             KeychainCredentialStore.set(username, account: .username)
             KeychainCredentialStore.set(password, account: .password)
-            defaults.removeObject(forKey: "playlistUsername")
-            defaults.removeObject(forKey: "playlistPassword")
         }
     }
 
@@ -42,6 +40,10 @@ final class PlaylistCredentials {
 
     func loadPassword(for profileID: UUID) {
         password = KeychainCredentialStore.value(accountName: "playlist.password.\(profileID.uuidString)") ?? ""
+    }
+
+    func deletePassword(for profileID: UUID) {
+        KeychainCredentialStore.set("", accountName: "playlist.password.\(profileID.uuidString)")
     }
 }
 
