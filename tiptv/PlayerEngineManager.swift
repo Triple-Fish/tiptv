@@ -97,13 +97,14 @@ final class PlayerEngineManager {
 
     /// Marks a channel as requiring the FFmpeg engine due to sound-only / MPEG-2 detection
     func markChannelRequiresFFmpeg(_ channel: Channel) {
-        channelsRequiringFFmpeg.insert(channel.streamURLString)
+        let inserted = channelsRequiringFFmpeg.insert(channel.streamURLString).inserted
+        guard inserted else { return }
         UserDefaults.standard.set(Array(channelsRequiringFFmpeg), forKey: cacheKey)
     }
 
     /// Removes a channel from requiring FFmpeg
     func clearFFmpegForChannel(_ channel: Channel) {
-        channelsRequiringFFmpeg.remove(channel.streamURLString)
+        guard channelsRequiringFFmpeg.remove(channel.streamURLString) != nil else { return }
         UserDefaults.standard.set(Array(channelsRequiringFFmpeg), forKey: cacheKey)
     }
 

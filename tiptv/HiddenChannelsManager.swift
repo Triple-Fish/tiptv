@@ -26,16 +26,18 @@ final class HiddenChannelsManager {
     }
 
     func hideChannel(_ channel: Channel) {
-        hiddenStreamURLs.insert(channel.streamURLString)
+        let inserted = hiddenStreamURLs.insert(channel.streamURLString).inserted
+        guard inserted else { return }
         persist()
     }
 
     func unhideChannel(_ channel: Channel) {
-        hiddenStreamURLs.remove(channel.streamURLString)
+        guard hiddenStreamURLs.remove(channel.streamURLString) != nil else { return }
         persist()
     }
 
     func unhideAll() {
+        guard !hiddenStreamURLs.isEmpty else { return }
         hiddenStreamURLs.removeAll()
         persist()
     }

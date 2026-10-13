@@ -24,6 +24,7 @@ final class RecentChannelsManager {
 
     func recordChannel(_ channel: Channel) {
         let url = channel.streamURLString
+        guard recentStreamURLs.first != url else { return }
         var list = recentStreamURLs
         list.removeAll { $0 == url }
         list.insert(url, at: 0)

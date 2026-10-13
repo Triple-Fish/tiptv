@@ -47,7 +47,10 @@ final class ContinueWatchingManager {
     }
 
     func remove(_ channel: Channel) {
+        let previousCount = entries.count
         entries.removeAll { $0.channel.id == channel.id }
+        guard entries.count != previousCount else { return }
+        lastPersistedAt.removeValue(forKey: channel.id)
         persist()
     }
 

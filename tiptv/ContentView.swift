@@ -1772,7 +1772,8 @@ struct FullScreenPlayerView: View {
                 mkvCoordinator.resetPlayer()
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: AVPlayerItem.playbackStalledNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: AVPlayerItem.playbackStalledNotification)) { notification in
+            guard notification.object as? AVPlayerItem === player?.currentItem else { return }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 player?.play()

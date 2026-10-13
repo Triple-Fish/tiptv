@@ -75,22 +75,24 @@ private final class UnifiedSearchModel {
         series: [Channel],
         programs: [UUID: [EPGProgram]]
     ) -> ([UnifiedSearchResult], [UnifiedSearchResult], [UnifiedSearchResult], [UnifiedSearchResult]) {
+            let normalizedQuery = query.lowercased()
             let live = channels.lazy
-                .filter { !$0.isVOD && Self.matches($0, query: query) }
+                .filter { !$0.isVOD && Self.matches($0, query: normalizedQuery) }
                 .prefix(60)
                 .map { UnifiedSearchResult(id: "live-\($0.id)", kind: .live, title: $0.uniformName, subtitle: $0.group ?? "Live TV", channel: $0) }
             let movieMatches = movies.lazy
-                .filter { Self.matches($0, query: query) }
+                .filter { Self.matches($0, query: normalizedQuery) }
                 .prefix(60)
                 .map { UnifiedSearchResult(id: "movie-\($0.id)", kind: .movie, title: $0.uniformName, subtitle: $0.group ?? "Movie", channel: $0) }
             let seriesMatches = series.lazy
-                .filter { Self.matches($0, query: query) }
+                .filter { Self.matches($0, query: normalizedQuery) }
                 .prefix(60)
                 .map { UnifiedSearchResult(id: "series-\($0.id)", kind: .series, title: $0.uniformName, subtitle: $0.group ?? "Series", channel: $0) }
 
             let channelsByID = Dictionary(uniqueKeysWithValues: channels.map { ($0.id, $0) })
             var programmeMatches: [UnifiedSearchResult] = []
             for (channelID, channelPrograms) in programs {
+                if programmeMatches.count >= 60 { break }
                 guard let channel = channelsByID[channelID] else { continue }
                 for programme in channelPrograms where programmeMatches.count < 60 {
                     if programme.title.localizedCaseInsensitiveContains(query)
@@ -111,9 +113,7 @@ private final class UnifiedSearchModel {
     }
 
     nonisolated private static func matches(_ channel: Channel, query: String) -> Bool {
-        channel.uniformName.localizedCaseInsensitiveContains(query)
-            || channel.name.localizedCaseInsensitiveContains(query)
-            || channel.group?.localizedCaseInsensitiveContains(query) == true
+        channel.searchKey.contains(query)
     }
 }
 

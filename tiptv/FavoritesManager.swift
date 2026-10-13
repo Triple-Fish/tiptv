@@ -36,12 +36,13 @@ final class FavoritesManager {
     }
 
     func addFavorite(_ channel: Channel) {
-        favoriteStreamURLs.insert(channel.streamURLString)
+        let inserted = favoriteStreamURLs.insert(channel.streamURLString).inserted
+        guard inserted else { return }
         persist()
     }
 
     func removeFavorite(_ channel: Channel) {
-        favoriteStreamURLs.remove(channel.streamURLString)
+        guard favoriteStreamURLs.remove(channel.streamURLString) != nil else { return }
         persist()
     }
 
