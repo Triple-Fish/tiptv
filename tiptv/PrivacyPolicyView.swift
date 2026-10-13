@@ -64,7 +64,7 @@ struct PrivacyPolicyView: View {
           icon: "creditcard.fill",
           title: "In-App Purchases",
           description:
-            "All purchases and subscriptions are handled securely through Apple's App Store and StoreKit. Tiptv never receives, processes, or stores your credit card or billing details."
+            "The lifetime license purchase is handled securely through Apple's App Store and StoreKit. Tiptv never receives, processes, or stores your credit card or billing details."
         )
 
         PrivacyPolicyItem(
@@ -91,13 +91,17 @@ struct PrivacyPolicyView: View {
 
       Section("Contact") {
         VStack(alignment: .leading, spacing: 6) {
-          Text(
-            "If you have questions or feedback regarding this privacy policy, please contact support via the repository or support channels."
-          )
-          .font(.system(.footnote, design: .rounded))
-          .foregroundStyle(.white.opacity(0.75))
+          Text("If you have questions or feedback regarding this privacy policy, contact Tiptv Support on GitHub.")
+            .font(.system(.footnote, design: .rounded))
+            .foregroundStyle(.white.opacity(0.75))
 
-          Text("Last updated: September 2026")
+          if let supportURL = URL(string: "https://github.com/Triple-Fish/tiptv/issues") {
+            Link("Open Tiptv Support", destination: supportURL)
+              .font(.system(.footnote, design: .rounded).weight(.semibold))
+              .foregroundStyle(TipTVTheme.aqua)
+          }
+
+          Text("Last updated: October 2026")
             .font(.system(size: 11, design: .rounded))
             .foregroundStyle(.secondary)
             .padding(.top, 4)

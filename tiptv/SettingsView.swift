@@ -201,7 +201,7 @@ struct SettingsView: View {
           .foregroundStyle(.white.opacity(0.85))
       }
     } header: {
-      Text("License & Subscription")
+      Text("License & Purchase")
     } footer: {
       Text(
         licenseManager.hasPurchasedLicense
