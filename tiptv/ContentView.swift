@@ -14,6 +14,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case movies = "Movies"
     case series = "Series"
     case favorites = "Favourites"
+    case search = "Search"
     case more = "More"
 
     var id: String { rawValue }
@@ -24,6 +25,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .movies: return "film"
         case .series: return "tv.inset.filled"
         case .favorites: return "heart.fill"
+        case .search: return "magnifyingglass"
         case .more: return "ellipsis"
         }
     }
@@ -482,6 +484,15 @@ struct ContentView: View {
                     }
                 )
             }
+            .padding(.bottom, 68)
+
+        case .search:
+            UnifiedSearchView(
+                channels: visibleChannels,
+                movies: movies,
+                series: series,
+                onSelect: selectChannel
+            )
             .padding(.bottom, 68)
 
         case .more:
@@ -952,13 +963,14 @@ struct ContentView: View {
     }
 
     private func loadPlaylist() async {
+        guard !isLoadingPlaylist else { return }
         guard let url = validatedPlaylistURL else {
             playlistMessage = "Enter a valid HTTP or HTTPS playlist URL."
             return
         }
 
         isLoadingPlaylist = true
-        playlistMessage = nil
+        playlistMessage = "Connecting to your provider…"
 
         do {
             // 1. Check if this is an Xtream Codes server (server URL + username + password)
@@ -969,6 +981,7 @@ struct ContentView: View {
                     password: credentials.password
                 )
                 if isXtream {
+                    playlistMessage = "Downloading live channels…"
                     let xtreamChannels = try await XtreamService.fetchXtreamChannels(
                         baseURL: playlistURL,
                         username: credentials.username,
@@ -1018,6 +1031,7 @@ struct ContentView: View {
                 throw PlaylistError.unavailable
             }
 
+            playlistMessage = "Reading playlist…"
             let importedChannels = try await PlaylistParser.channels(fromFileURL: tempFileURL)
             guard !importedChannels.isEmpty else {
                 throw PlaylistError.noChannels
@@ -1032,7 +1046,11 @@ struct ContentView: View {
             loadProgrammeGuide(for: importedChannels, force: true)
             activeSheet = nil
         } catch {
-            playlistMessage = error.localizedDescription
+            if channels.isEmpty, await restoreCachedContent() {
+                playlistMessage = "The provider could not be reached. Your saved channels are still available."
+            } else {
+                playlistMessage = "\(error.localizedDescription) Your existing channels were kept."
+            }
         }
 
         isLoadingPlaylist = false

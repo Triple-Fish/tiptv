@@ -30,6 +30,7 @@ struct SettingsView: View {
     @ObservedObject private var licenseManager = LicenseManager.shared
     @State private var playerEngine = PlayerEngineManager.shared
     @State private var profileStore = PlaylistProfileStore.shared
+    @State private var epgManager = EPGManager.shared
     @ObservedObject private var seriesPlaybackManager = SeriesPlaybackManager.shared
     @State private var showingDeleteConfirmation = false
     @State private var showingRestoreAllConfirmation = false
@@ -229,7 +230,14 @@ struct SettingsView: View {
                 }
 
                 LabeledContent("Total Channels", value: "\(totalChannels)")
-                LabeledContent("Programme Guide", value: epgURL.isEmpty ? "Not configured" : "XMLTV connected")
+                LabeledContent("Programme Guide", value: epgManager.sourceURL == nil ? "Not loaded" : "\(epgManager.diagnostics.matchPercentage)% matched")
+
+                NavigationLink {
+                    EPGDiagnosticsView(channels: allChannels, reloadGuide: onReload)
+                } label: {
+                    Label("Guide Diagnostics & Matching", systemImage: "waveform.path.ecg")
+                        .foregroundStyle(.white)
+                }
 
                 Button(action: onReload) {
                     Label("Reload Playlist", systemImage: "arrow.clockwise")
