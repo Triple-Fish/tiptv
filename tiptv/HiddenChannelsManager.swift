@@ -9,50 +9,50 @@ import Observation
 @MainActor
 @Observable
 final class HiddenChannelsManager {
-    static let shared = HiddenChannelsManager()
+  static let shared = HiddenChannelsManager()
 
-    private let userDefaultsKey = "tiptv_hidden_channel_urls"
+  private let userDefaultsKey = "tiptv_hidden_channel_urls"
 
-    private(set) var hiddenStreamURLs: Set<String> = []
+  private(set) var hiddenStreamURLs: Set<String> = []
 
-    init() {
-        if let saved = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {
-            hiddenStreamURLs = Set(saved)
-        }
+  init() {
+    if let saved = UserDefaults.standard.array(forKey: userDefaultsKey) as? [String] {
+      hiddenStreamURLs = Set(saved)
     }
+  }
 
-    func isHidden(_ channel: Channel) -> Bool {
-        hiddenStreamURLs.contains(channel.streamURLString)
-    }
+  func isHidden(_ channel: Channel) -> Bool {
+    hiddenStreamURLs.contains(channel.streamURLString)
+  }
 
-    func hideChannel(_ channel: Channel) {
-        let inserted = hiddenStreamURLs.insert(channel.streamURLString).inserted
-        guard inserted else { return }
-        persist()
-    }
+  func hideChannel(_ channel: Channel) {
+    let inserted = hiddenStreamURLs.insert(channel.streamURLString).inserted
+    guard inserted else { return }
+    persist()
+  }
 
-    func unhideChannel(_ channel: Channel) {
-        guard hiddenStreamURLs.remove(channel.streamURLString) != nil else { return }
-        persist()
-    }
+  func unhideChannel(_ channel: Channel) {
+    guard hiddenStreamURLs.remove(channel.streamURLString) != nil else { return }
+    persist()
+  }
 
-    func unhideAll() {
-        guard !hiddenStreamURLs.isEmpty else { return }
-        hiddenStreamURLs.removeAll()
-        persist()
-    }
+  func unhideAll() {
+    guard !hiddenStreamURLs.isEmpty else { return }
+    hiddenStreamURLs.removeAll()
+    persist()
+  }
 
-    func filterVisible(from channels: [Channel]) -> [Channel] {
-        if hiddenStreamURLs.isEmpty { return channels }
-        return channels.filter { !hiddenStreamURLs.contains($0.streamURLString) }
-    }
+  func filterVisible(from channels: [Channel]) -> [Channel] {
+    if hiddenStreamURLs.isEmpty { return channels }
+    return channels.filter { !hiddenStreamURLs.contains($0.streamURLString) }
+  }
 
-    func filterHidden(from channels: [Channel]) -> [Channel] {
-        if hiddenStreamURLs.isEmpty { return [] }
-        return channels.filter { hiddenStreamURLs.contains($0.streamURLString) }
-    }
+  func filterHidden(from channels: [Channel]) -> [Channel] {
+    if hiddenStreamURLs.isEmpty { return [] }
+    return channels.filter { hiddenStreamURLs.contains($0.streamURLString) }
+  }
 
-    private func persist() {
-        UserDefaults.standard.set(Array(hiddenStreamURLs), forKey: userDefaultsKey)
-    }
+  private func persist() {
+    UserDefaults.standard.set(Array(hiddenStreamURLs), forKey: userDefaultsKey)
+  }
 }
