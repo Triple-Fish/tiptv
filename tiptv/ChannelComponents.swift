@@ -78,9 +78,10 @@ struct MiniPlayerBar: View {
       } label: {
         Image(systemName: isPlaying ? "pause.fill" : "play.fill")
           .font(.system(size: 12, weight: .medium))
-          .foregroundStyle(.white.opacity(0.9))
-          .frame(width: 32, height: 32)
-          .background(Color.white.opacity(0.08), in: Circle())
+          .foregroundStyle(.white)
+          .frame(width: 40, height: 40)
+          .background(TipTVTheme.accent.opacity(0.2), in: Circle())
+          .overlay(Circle().strokeBorder(TipTVTheme.accent.opacity(0.4), lineWidth: 0.75))
       }
       .buttonStyle(.plain)
       .accessibilityLabel(isPlaying ? "Pause" : "Play")
@@ -88,9 +89,9 @@ struct MiniPlayerBar: View {
       Button(action: onClose) {
         Image(systemName: "xmark")
           .font(.system(size: 11, weight: .medium))
-          .foregroundStyle(.white.opacity(0.6))
-          .frame(width: 28, height: 28)
-          .background(Color.white.opacity(0.06), in: Circle())
+          .foregroundStyle(.white.opacity(0.72))
+          .frame(width: 36, height: 36)
+          .background(Color.white.opacity(0.08), in: Circle())
       }
       .buttonStyle(.plain)
       .accessibilityLabel("Stop Playback")
@@ -98,13 +99,13 @@ struct MiniPlayerBar: View {
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
     .background(
-      RoundedRectangle(cornerRadius: 16)
+      RoundedRectangle(cornerRadius: 18, style: .continuous)
         .fill(.ultraThinMaterial)
         .overlay(
-          RoundedRectangle(cornerRadius: 16)
-            .strokeBorder(TipTVTheme.accent.opacity(0.35), lineWidth: 1)
+          RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(TipTVTheme.accent.opacity(0.42), lineWidth: 1)
         )
-        .shadow(color: TipTVTheme.accent.opacity(0.2), radius: 10, y: 3)
+        .shadow(color: TipTVTheme.accent.opacity(0.22), radius: 14, y: 5)
     )
   }
 }
@@ -211,7 +212,7 @@ struct ChannelSectionHeader: View {
       Text(isFiltered ? categoryTitle.uppercased() : "ALL CHANNELS")
         .font(.system(size: 11, weight: .bold, design: .rounded))
         .tracking(0.8)
-        .foregroundStyle(.white.opacity(0.38))
+        .foregroundStyle(.white.opacity(0.56))
 
       Spacer()
 
@@ -220,7 +221,7 @@ struct ChannelSectionHeader: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 2.5)
         .background(Color.white.opacity(0.06), in: Capsule())
-        .foregroundStyle(.white.opacity(0.5))
+        .foregroundStyle(.white.opacity(0.65))
     }
     .textCase(nil)
     .padding(.top, 4)
@@ -271,11 +272,11 @@ struct ChannelRow: View {
           Text(group)
             .lineLimit(1)
             .font(.system(.caption, design: .rounded))
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(.white.opacity(0.62))
         } else {
           Text("Live TV")
             .font(.system(.caption, design: .rounded))
-            .foregroundStyle(.white.opacity(0.35))
+            .foregroundStyle(.white.opacity(0.5))
         }
       }
 
@@ -288,18 +289,18 @@ struct ChannelRow: View {
       } else {
         Image(systemName: "chevron.right")
           .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(Color.white.opacity(0.22))
+          .foregroundStyle(Color.white.opacity(0.38))
       }
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 10)
     .background {
-      RoundedRectangle(cornerRadius: 14)
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
         .fill(isSelected ? TipTVTheme.accent.opacity(0.2) : TipTVTheme.cardBackground)
         .overlay {
-          RoundedRectangle(cornerRadius: 14)
+          RoundedRectangle(cornerRadius: 16, style: .continuous)
             .strokeBorder(
-              isSelected ? TipTVTheme.accent.opacity(0.6) : Color.white.opacity(0.06),
+              isSelected ? TipTVTheme.accent.opacity(0.65) : TipTVTheme.cardBorder,
               lineWidth: 1
             )
         }
@@ -308,6 +309,14 @@ struct ChannelRow: View {
           radius: 8,
           y: 3
         )
+    }
+    .overlay(alignment: .leading) {
+      if isSelected {
+        Capsule()
+          .fill(TipTVTheme.artworkGradient)
+          .frame(width: 3, height: 34)
+          .padding(.leading, 2)
+      }
     }
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)

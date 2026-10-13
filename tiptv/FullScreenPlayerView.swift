@@ -444,15 +444,15 @@ struct FullScreenPlayerView: View {
       Button(action: togglePlayPause) {
         ZStack {
           Circle()
-            .fill(.ultraThinMaterial)
-            .frame(width: 64, height: 64)
+            .fill(themeManager.currentTheme.artworkGradient)
+            .frame(width: 68, height: 68)
             .overlay(
-              Circle().strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+              Circle().strokeBorder(Color.white.opacity(0.42), lineWidth: 1)
             )
-            .shadow(color: themeManager.accent.opacity(0.35), radius: 14, y: 3)
+            .shadow(color: themeManager.accent.opacity(0.5), radius: 18, y: 5)
 
           Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-            .font(.system(size: 22, weight: .medium))
+            .font(.system(size: 24, weight: .semibold))
             .foregroundStyle(.white)
             .offset(x: isPlaying ? 0 : 1.5)
         }

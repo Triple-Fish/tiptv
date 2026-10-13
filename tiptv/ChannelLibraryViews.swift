@@ -5,6 +5,7 @@ import SwiftUI
 struct BottomTabBar: View {
   @Binding var selectedTab: AppTab
   let onSelectTab: (AppTab) -> Void
+  @Namespace private var selectionNamespace
 
   var body: some View {
     HStack(spacing: 4) {
@@ -16,19 +17,26 @@ struct BottomTabBar: View {
         } label: {
           VStack(spacing: 4) {
             Image(systemName: tab.icon)
-              .font(.system(size: 18, weight: isSelected ? .bold : .regular))
-              .foregroundStyle(isSelected ? TipTVTheme.accent : .white.opacity(0.42))
+              .font(.system(size: 18, weight: isSelected ? .bold : .medium))
+              .foregroundStyle(isSelected ? .white : .white.opacity(0.58))
 
             Text(tab.rawValue)
               .font(.system(size: 10, weight: isSelected ? .semibold : .medium, design: .rounded))
-              .foregroundStyle(isSelected ? TipTVTheme.accent : .white.opacity(0.45))
+              .foregroundStyle(isSelected ? .white : .white.opacity(0.58))
           }
           .frame(maxWidth: .infinity)
           .padding(.vertical, 9)
-          .background(
-            isSelected ? TipTVTheme.accent.opacity(0.16) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-          )
+          .background {
+            if isSelected {
+              RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(TipTVTheme.accent.opacity(0.2))
+                .overlay {
+                  RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(TipTVTheme.accent.opacity(0.42), lineWidth: 0.75)
+                }
+                .matchedGeometryEffect(id: "selectedTab", in: selectionNamespace)
+            }
+          }
         }
         .buttonStyle(.plain)
       }
@@ -43,12 +51,13 @@ struct BottomTabBar: View {
       }
       .overlay {
         RoundedRectangle(cornerRadius: 20, style: .continuous)
-          .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+          .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75)
       }
       .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
     )
     .padding(.horizontal, 12)
     .padding(.bottom, 8)
+    .animation(.spring(response: 0.32, dampingFraction: 0.82), value: selectedTab)
   }
 }
 
@@ -351,5 +360,12 @@ private struct ChannelLibraryDashboard: View {
       RoundedRectangle(cornerRadius: 18, style: .continuous)
         .strokeBorder(TipTVTheme.cardBorder, lineWidth: 0.5)
     }
+    .overlay(alignment: .top) {
+      Capsule()
+        .fill(TipTVTheme.artworkGradient)
+        .frame(width: 72, height: 2)
+        .padding(.top, 1)
+    }
+    .shadow(color: TipTVTheme.accent.opacity(0.08), radius: 14, y: 6)
   }
 }

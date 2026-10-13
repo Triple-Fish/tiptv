@@ -738,8 +738,14 @@ struct SeriesDetailView: View {
       HStack(alignment: .top, spacing: 16) {
         // Poster
         ZStack(alignment: .center) {
-          RoundedRectangle(cornerRadius: 12)
-            .fill(Color.white.opacity(0.06))
+          RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(
+              LinearGradient(
+                colors: [TipTVTheme.cardBackground, TipTVTheme.surface.opacity(0.9)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+              )
+            )
 
           MovieArtworkView(
             logoURL: seriesInfo?.coverURL ?? series.logoURL,
@@ -969,11 +975,12 @@ struct MoviePosterCard: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 155)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-          RoundedRectangle(cornerRadius: 12)
-            .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+          RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(TipTVTheme.cardBorder, lineWidth: 0.75)
         )
+        .shadow(color: Color.black.opacity(0.24), radius: 8, y: 4)
         .overlay(alignment: .topTrailing) {
           Text(isMP4 ? "MP4" : "MKV")
             .font(.system(size: 8, weight: .bold, design: .rounded))
@@ -998,20 +1005,20 @@ struct MoviePosterCard: View {
         }
 
         Text(item.uniformName)
-          .font(.system(size: 12, weight: .medium, design: .rounded))
-          .foregroundStyle(.white.opacity(0.9))
+          .font(.system(size: 12, weight: .semibold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.94))
           .lineLimit(2)
-          .multilineTextAlignment(.center)
+          .multilineTextAlignment(.leading)
           .frame(maxWidth: .infinity)
-          .frame(height: 32, alignment: .top)
+          .frame(height: 32, alignment: .topLeading)
 
         if let group = item.group {
           Text(group)
             .font(.system(size: 10, design: .rounded))
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(.white.opacity(0.58))
             .lineLimit(1)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity, alignment: .center)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
       }
       .frame(maxWidth: .infinity)

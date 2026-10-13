@@ -195,6 +195,9 @@ struct UnifiedSearchView: View {
             title: "Series & Episodes", results: model.seriesResults, onSelect: onSelect)
         }
       }
+      .listStyle(.plain)
+      .scrollContentBackground(.hidden)
+      .background(TipTVTheme.contentBackground.ignoresSafeArea())
       .navigationTitle("Search")
       .searchable(
         text: $query, placement: .navigationBarDrawer(displayMode: .always),
@@ -220,7 +223,7 @@ private struct UnifiedSearchSection: View {
 
   var body: some View {
     if !results.isEmpty {
-      Section(title) {
+      Section {
         ForEach(results) { result in
           Button {
             onSelect(result.channel)
@@ -231,7 +234,17 @@ private struct UnifiedSearchSection: View {
               icon: result.kind.icon
             )
           }
+          .buttonStyle(.plain)
+          .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+          .listRowBackground(Color.clear)
+          .listRowSeparator(.hidden)
         }
+      } header: {
+        Text(title.uppercased())
+          .font(.system(size: 11, weight: .bold, design: .rounded))
+          .tracking(0.8)
+          .foregroundStyle(.white.opacity(0.56))
+          .textCase(nil)
       }
     }
   }
@@ -245,19 +258,33 @@ private struct UnifiedSearchRow: View {
   var body: some View {
     HStack(spacing: 12) {
       Image(systemName: icon)
+        .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(TipTVTheme.aqua)
-        .frame(width: 24)
+        .frame(width: 36, height: 36)
+        .background(TipTVTheme.aqua.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
       VStack(alignment: .leading, spacing: 3) {
         Text(title)
-          .foregroundStyle(.primary)
+          .font(.system(.body, design: .rounded).weight(.medium))
+          .foregroundStyle(.white)
           .lineLimit(1)
         if !subtitle.isEmpty {
           Text(subtitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(.system(.caption, design: .rounded))
+            .foregroundStyle(.white.opacity(0.58))
             .lineLimit(1)
         }
       }
+      Spacer(minLength: 8)
+      Image(systemName: "chevron.right")
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(.white.opacity(0.32))
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 10)
+    .background(TipTVTheme.cardBackground, in: RoundedRectangle(cornerRadius: 14))
+    .overlay {
+      RoundedRectangle(cornerRadius: 14)
+        .strokeBorder(TipTVTheme.cardBorder, lineWidth: 0.75)
     }
   }
 }
