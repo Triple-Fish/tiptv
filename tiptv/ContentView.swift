@@ -90,6 +90,7 @@ struct ContentView: View {
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var catalogRefreshTask: Task<Void, Never>?
     @State private var channelFilterTask: Task<Void, Never>?
+    @State private var epgLoadTask: Task<Void, Never>?
 
     private func updateVisibleChannels() {
         catalogRefreshTask?.cancel()
@@ -337,6 +338,7 @@ struct ContentView: View {
                     playlistURL: $playlistURL,
                     username: $credentials.username,
                     password: $credentials.password,
+                    epgURL: $epgURL,
                     isLoading: isLoadingPlaylist,
                     message: playlistMessage,
                     loadPlaylist: {
@@ -385,6 +387,7 @@ struct ContentView: View {
             catalogRefreshTask?.cancel()
             searchDebounceTask?.cancel()
             channelFilterTask?.cancel()
+            epgLoadTask?.cancel()
         }
     }
 
@@ -977,6 +980,7 @@ struct ContentView: View {
                     playlistMessage = "\(xtreamChannels.count) channels loaded."
                     await PlaylistCacheManager.shared.saveChannels(xtreamChannels, for: playlistCacheKey)
                     persistCurrentProfile()
+                    loadProgrammeGuide(for: xtreamChannels, force: true)
                     activeSheet = nil
                     isLoadingPlaylist = false
                     Task {
@@ -1025,6 +1029,7 @@ struct ContentView: View {
             playlistMessage = "\(importedChannels.count) channels loaded."
             await PlaylistCacheManager.shared.saveChannels(importedChannels, for: playlistCacheKey)
             persistCurrentProfile()
+            loadProgrammeGuide(for: importedChannels, force: true)
             activeSheet = nil
         } catch {
             playlistMessage = error.localizedDescription
@@ -1053,6 +1058,8 @@ struct ContentView: View {
             credentials.clear()
         }
         channels = []
+        epgLoadTask?.cancel()
+        EPGManager.shared.clearCache()
         updateVisibleChannels()
         movies = []
         series = []
@@ -1084,12 +1091,45 @@ struct ContentView: View {
         updateVisibleChannels()
         selectedCategory = .all
         playlistMessage = "\(cachedChannels.count) cached channels loaded."
+        loadProgrammeGuide(for: cachedChannels)
 
         async let cachedMovies = PlaylistCacheManager.shared.loadCachedMovies(for: playlistCacheKey)
         async let cachedSeries = PlaylistCacheManager.shared.loadCachedSeries(for: playlistCacheKey)
         movies = await cachedMovies ?? []
         series = await cachedSeries ?? []
         return true
+    }
+
+    private func loadProgrammeGuide(for channels: [Channel], force: Bool = false) {
+        epgLoadTask?.cancel()
+
+        guard !channels.isEmpty, let url = resolvedEPGURL else {
+            EPGManager.shared.clearCache()
+            return
+        }
+
+        epgLoadTask = Task {
+            await EPGManager.shared.load(from: url, channels: channels, force: force)
+        }
+    }
+
+    private var resolvedEPGURL: URL? {
+        let configuredURL = epgURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: configuredURL),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            return url
+        }
+
+        guard !credentials.username.isEmpty, !credentials.password.isEmpty,
+              var components = URLComponents(string: "\(XtreamService.cleanBaseURL(playlistURL))/xmltv.php") else {
+            return nil
+        }
+        components.queryItems = [
+            URLQueryItem(name: "username", value: credentials.username),
+            URLQueryItem(name: "password", value: credentials.password)
+        ]
+        return components.url
     }
 
     private func persistCurrentProfile() {
@@ -2851,6 +2891,7 @@ struct PlaylistImportView: View {
     @Binding var playlistURL: String
     @Binding var username: String
     @Binding var password: String
+    @Binding var epgURL: String
     let isLoading: Bool
     let message: String?
     let loadPlaylist: () async -> Void
@@ -2908,6 +2949,22 @@ struct PlaylistImportView: View {
                 }
 
                 Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "calendar")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18)
+                        TextField("https://example.com/epg.xml", text: $epgURL)
+                            .disableAutocapitalization()
+                            .autocorrectionDisabled()
+                            .urlKeyboard()
+                    }
+                } header: {
+                    Text("Programme Guide (Optional)")
+                } footer: {
+                    Text("Enter your provider's XMLTV URL. Xtream playlists will try the provider's standard guide automatically when this is blank.")
+                }
+
+                Section {
                     Text("Use a playlist you are authorized to access. tiptv supports standard M3U, M3U8, and Xtream Codes playlists.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -2915,8 +2972,9 @@ struct PlaylistImportView: View {
 
                 if let message {
                     Section {
-                        Label(message, systemImage: "exclamationmark.circle")
-                            .foregroundStyle(.red)
+                        let didLoad = message.contains("loaded")
+                        Label(message, systemImage: didLoad ? "checkmark.circle.fill" : "exclamationmark.circle")
+                            .foregroundStyle(didLoad ? tiptvTheme.aqua : .red)
                     }
                 }
 
