@@ -74,6 +74,10 @@ struct ContentView: View {
     @State private var streamErrorMessage: String? = nil
     @State private var isStreamLoading = false
     @State private var activeStatusObserver: NSKeyValueObservation? = nil
+    @State private var playbackStallObserver: NSObjectProtocol? = nil
+    @State private var playbackFailureObserver: NSObjectProtocol? = nil
+    @State private var playbackRecoveryTask: Task<Void, Never>? = nil
+    @State private var playbackRecoveryAttempts = 0
     @State private var selectedTab: AppTab = .tvGuide
     @State private var searchText = ""
     @State private var movieSearchText = ""
@@ -390,6 +394,7 @@ struct ContentView: View {
             searchDebounceTask?.cancel()
             channelFilterTask?.cancel()
             epgLoadTask?.cancel()
+            resetPlaybackRecovery()
         }
     }
 
@@ -533,6 +538,7 @@ struct ContentView: View {
         isStreamLoading = true
         activeStatusObserver?.invalidate()
         activeStatusObserver = nil
+        resetPlaybackRecovery()
 
         // If this is a movie or series or selected on the movies/series tab, DO NOT load or start playing in that screen.
         // Just present the detail screen showing the picture/thumbnail. Playback only begins in full screen.
@@ -583,6 +589,7 @@ struct ContentView: View {
         videoValidationTask = nil
         let newIsFFmpeg = playerEngine.toggleEngine(for: channel, currentIsFFmpeg: isUsingKSPlayer)
         if newIsFFmpeg {
+            resetPlaybackRecovery()
             player?.pause()
             player = nil
             streamErrorMessage = nil
@@ -642,6 +649,7 @@ struct ContentView: View {
                 self.player = nil
                 self.activeStatusObserver?.invalidate()
                 self.activeStatusObserver = nil
+                self.resetPlaybackRecovery()
                 self.presentationSizeObserver?.invalidate()
                 self.presentationSizeObserver = nil
                 withAnimation(.easeInOut(duration: 0.25)) {
@@ -703,7 +711,7 @@ struct ContentView: View {
             fallbackURL = nil
         }
 
-        let newPlayer = makePlayer(for: primaryURL, fallbackURL: fallbackURL)
+        let newPlayer = makePlayer(for: primaryURL, fallbackURL: fallbackURL, channel: channel)
         player = newPlayer
         newPlayer.play()
     }
@@ -715,6 +723,7 @@ struct ContentView: View {
         presentationSizeObserver = nil
         activeStatusObserver?.invalidate()
         activeStatusObserver = nil
+        resetPlaybackRecovery()
         streamErrorMessage = nil
         isStreamLoading = false
         player?.pause()
@@ -722,7 +731,7 @@ struct ContentView: View {
         isUsingKSPlayer = false
     }
 
-    private func makePlayer(for url: URL, fallbackURL: URL? = nil) -> AVPlayer {
+    private func makePlayer(for url: URL, fallbackURL: URL? = nil, channel: Channel) -> AVPlayer {
         let headers: [String: String] = [
             "User-Agent": XtreamService.defaultUserAgent
         ]
@@ -746,6 +755,9 @@ struct ContentView: View {
                 guard let player else { return }
                 switch currentItem.status {
                 case .readyToPlay:
+                    self.playbackRecoveryTask?.cancel()
+                    self.playbackRecoveryTask = nil
+                    self.playbackRecoveryAttempts = 0
                     self.isStreamLoading = false
                     self.streamErrorMessage = nil
                     player.play()
@@ -769,6 +781,9 @@ struct ContentView: View {
                             guard let player else { return }
                             Task { @MainActor in
                                 if fbItem.status == .readyToPlay {
+                                    self.playbackRecoveryTask?.cancel()
+                                    self.playbackRecoveryTask = nil
+                                    self.playbackRecoveryAttempts = 0
                                     self.isStreamLoading = false
                                     self.streamErrorMessage = nil
                                     player.play()
@@ -783,6 +798,7 @@ struct ContentView: View {
                                         print("Native player failed for both URLs, attempting FFmpeg for \(ch.uniformName)")
                                         self.player?.pause()
                                         self.player = nil
+                                        self.resetPlaybackRecovery()
                                         withAnimation(.easeInOut(duration: 0.25)) {
                                             self.isUsingKSPlayer = true
                                             self.streamErrorMessage = nil
@@ -802,6 +818,7 @@ struct ContentView: View {
                             }
                         }
                         player.replaceCurrentItem(with: fallbackItem)
+                        self.observePlaybackRecovery(for: fallbackItem, channel: channel)
                         player.play()
                     } else {
                         // No fallback URL; attempt FFmpeg if allowed
@@ -811,6 +828,7 @@ struct ContentView: View {
                             print("Native player failed, switching to FFmpeg for \(ch.uniformName)")
                             self.player?.pause()
                             self.player = nil
+                            self.resetPlaybackRecovery()
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 self.isUsingKSPlayer = true
                                 self.streamErrorMessage = nil
@@ -835,42 +853,119 @@ struct ContentView: View {
             }
         }
 
-        // Automatic stall-recovery
-        NotificationCenter.default.addObserver(
+        observePlaybackRecovery(for: item, channel: channel)
+
+        return player
+    }
+
+    private func observePlaybackRecovery(for item: AVPlayerItem, channel: Channel) {
+        if let playbackStallObserver {
+            NotificationCenter.default.removeObserver(playbackStallObserver)
+        }
+        if let playbackFailureObserver {
+            NotificationCenter.default.removeObserver(playbackFailureObserver)
+        }
+
+        playbackStallObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.playbackStalledNotification,
             object: item,
             queue: .main
-        ) { [weak player] _ in
+        ) { _ in
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                player?.play()
+                self.schedulePlaybackRecovery(for: channel, expectedItem: item)
             }
         }
 
-        // Playback failure tracking with fallback
-        NotificationCenter.default.addObserver(
+        playbackFailureObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.failedToPlayToEndTimeNotification,
             object: item,
             queue: .main
-        ) { [weak player] notification in
+        ) { notification in
             let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
-            print("AVPlayerItem error: \(error?.localizedDescription ?? "unknown") for \(url)")
-            if let fallbackURL, fallbackURL != url {
-                guard let player else { return }
-                Task { @MainActor in
-                    print("Retrying with fallback URL: \(fallbackURL)")
-                    let fallbackAsset = AVURLAsset(url: fallbackURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-                    let fallbackItem = AVPlayerItem(asset: fallbackAsset)
-                    fallbackItem.preferredForwardBufferDuration = 4.0
-                    fallbackItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
-                    fallbackItem.automaticallyPreservesTimeOffsetFromLive = true
-                    player.replaceCurrentItem(with: fallbackItem)
-                    player.play()
-                }
+            #if DEBUG
+            print("Playback interrupted for \(channel.uniformName): \(error?.localizedDescription ?? "unknown error")")
+            #endif
+            Task { @MainActor in
+                self.schedulePlaybackRecovery(for: channel, expectedItem: item)
             }
         }
+    }
 
-        return player
+    private func schedulePlaybackRecovery(for channel: Channel, expectedItem: AVPlayerItem) {
+        guard player?.currentItem === expectedItem,
+              selectedChannelID == channel.id,
+              !isUsingKSPlayer else { return }
+
+        playbackRecoveryTask?.cancel()
+        playbackRecoveryAttempts += 1
+        let attempt = playbackRecoveryAttempts
+        isStreamLoading = true
+        streamErrorMessage = attempt == 1 ? "Reconnecting stream…" : "Trying backup player…"
+
+        playbackRecoveryTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(attempt == 1 ? 750 : 1_500))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  self.selectedChannelID == channel.id,
+                  self.player?.currentItem === expectedItem else { return }
+
+            if self.player?.timeControlStatus == .playing {
+                self.playbackRecoveryAttempts = 0
+                self.isStreamLoading = false
+                self.streamErrorMessage = nil
+                return
+            }
+
+            if attempt == 1 {
+                self.player?.play()
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, self.selectedChannelID == channel.id else { return }
+                if self.player?.timeControlStatus == .playing {
+                    self.playbackRecoveryAttempts = 0
+                    self.isStreamLoading = false
+                    self.streamErrorMessage = nil
+                } else if !channel.isVOD {
+                    self.startPlaybackForChannel(channel)
+                } else {
+                    self.isStreamLoading = false
+                    self.streamErrorMessage = "Playback was interrupted. Tap Retry to continue."
+                }
+                return
+            }
+
+            if self.playerEngine.enginePreference != .native {
+                self.player?.pause()
+                self.player = nil
+                self.resetPlaybackRecovery()
+                self.isUsingKSPlayer = true
+                self.isStreamLoading = false
+                self.streamErrorMessage = nil
+            } else {
+                self.isStreamLoading = false
+                self.streamErrorMessage = "The stream stopped responding. Tap Retry to reconnect."
+            }
+        }
+    }
+
+    private func resetPlaybackRecovery() {
+        playbackRecoveryTask?.cancel()
+        playbackRecoveryTask = nil
+        playbackRecoveryAttempts = 0
+        if let playbackStallObserver {
+            NotificationCenter.default.removeObserver(playbackStallObserver)
+        }
+        if let playbackFailureObserver {
+            NotificationCenter.default.removeObserver(playbackFailureObserver)
+        }
+        playbackStallObserver = nil
+        playbackFailureObserver = nil
     }
 
     private func stopPlayback() {
@@ -880,6 +975,7 @@ struct ContentView: View {
         presentationSizeObserver = nil
         activeStatusObserver?.invalidate()
         activeStatusObserver = nil
+        resetPlaybackRecovery()
         streamErrorMessage = nil
         isStreamLoading = false
         player?.pause()
