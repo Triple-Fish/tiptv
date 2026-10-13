@@ -298,7 +298,6 @@ struct MoviesCatalogView: View {
         }
         .background(tiptvTheme.contentBackground.ignoresSafeArea())
         .navigationTitle(title)
-        .searchable(text: $searchText, prompt: "Search \(title.lowercased())")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if isLoading {

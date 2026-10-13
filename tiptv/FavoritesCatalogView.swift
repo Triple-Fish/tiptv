@@ -129,7 +129,6 @@ struct FavoritesCatalogView: View {
             }
         }
         .navigationTitle("Favourites")
-        .searchable(text: $searchText, prompt: "Search favourites")
         .task {
             refreshFavorites()
         }

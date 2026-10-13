@@ -1422,7 +1422,6 @@ struct ChannelLibraryView: View {
         }
         .background(tiptvTheme.contentBackground.ignoresSafeArea())
         .navigationTitle("TV Guide")
-        .searchable(text: $searchText, prompt: "Search channels")
         .onChange(of: selectedCategory) {
             displayLimit = 250
         }
