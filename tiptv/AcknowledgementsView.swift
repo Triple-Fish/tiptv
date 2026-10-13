@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct OpenSourceLibrary: Identifiable {
-    let id = UUID()
+    var id: String { name }
     let name: String
     let role: String
     let license: String

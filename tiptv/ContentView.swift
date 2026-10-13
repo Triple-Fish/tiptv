@@ -79,10 +79,6 @@ struct ContentView: View {
     @State private var playbackRecoveryTask: Task<Void, Never>? = nil
     @State private var playbackRecoveryAttempts = 0
     @State private var selectedTab: AppTab = .tvGuide
-    @State private var searchText = ""
-    @State private var movieSearchText = ""
-    @State private var seriesSearchText = ""
-    @State private var favoritesSearchText = ""
     @State private var selectedCategory: ChannelCategory = .all
     @State private var activeSheet: ActiveSheet?
     @State private var isLoadingPlaylist = false
@@ -93,7 +89,6 @@ struct ContentView: View {
     @State private var categoryCounts: [ChannelCategory: Int] = [:]
     @State private var availableCategories: [ChannelCategory] = [.all]
     @State private var filteredChannels: [Channel] = []
-    @State private var searchDebounceTask: Task<Void, Never>?
     @State private var catalogRefreshTask: Task<Void, Never>?
     @State private var channelFilterTask: Task<Void, Never>?
     @State private var epgLoadTask: Task<Void, Never>?
@@ -104,7 +99,6 @@ struct ContentView: View {
         let hiddenURLs = hiddenChannelsManager.hiddenStreamURLs
         let favoriteURLs = favoritesManager.favoriteStreamURLs
         let category = selectedCategory
-        let query = searchText
 
         catalogRefreshTask = Task {
             let snapshot = await Task.detached(priority: .userInitiated) {
@@ -139,7 +133,7 @@ struct ContentView: View {
                     in: visible,
                     category: category,
                     favoriteStreamURLs: favoriteURLs,
-                    query: query
+                    query: ""
                 )
                 return ChannelCatalogSnapshot(
                     visibleChannels: visible,
@@ -162,27 +156,17 @@ struct ContentView: View {
         let currentChannels = visibleChannels
         let category = selectedCategory
         let favoriteURLs = favoritesManager.favoriteStreamURLs
-        let query = searchText
         channelFilterTask = Task {
             let filtered = await Task.detached(priority: .userInitiated) {
                 ChannelCatalog.filteredChannels(
                     in: currentChannels,
                     category: category,
                     favoriteStreamURLs: favoriteURLs,
-                    query: query
+                    query: ""
                 )
             }.value
             guard !Task.isCancelled else { return }
             filteredChannels = filtered
-        }
-    }
-
-    private func queueSearchFilter() {
-        searchDebounceTask?.cancel()
-        searchDebounceTask = Task {
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            guard !Task.isCancelled else { return }
-            updateFilteredChannels()
         }
     }
 
@@ -380,9 +364,6 @@ struct ContentView: View {
         .onChange(of: selectedCategory) { _, _ in
             updateFilteredChannels()
         }
-        .onChange(of: searchText) { _, _ in
-            queueSearchFilter()
-        }
         .onChange(of: favoritesManager.favoriteStreamURLs) { _, _ in
             updateVisibleChannels()
         }
@@ -391,7 +372,6 @@ struct ContentView: View {
         }
         .onDisappear {
             catalogRefreshTask?.cancel()
-            searchDebounceTask?.cancel()
             channelFilterTask?.cancel()
             epgLoadTask?.cancel()
             resetPlaybackRecovery()
@@ -410,7 +390,6 @@ struct ContentView: View {
                     categoryCounts: categoryCounts,
                     selectedCategory: $selectedCategory,
                     selectedChannelID: $selectedChannelID,
-                    searchText: $searchText,
                     isLoading: isLoadingPlaylist,
                     onSelectChannel: selectChannel,
                     openPlaylistImporter: { activeSheet = .playlistImport },
@@ -430,7 +409,6 @@ struct ContentView: View {
                     items: movies,
                     title: "Movies",
                     isLoading: isLoadingVOD,
-                    searchText: $movieSearchText,
                     onSelectChannel: { channel in
                         let movieItem = Channel(
                             id: channel.id,
@@ -459,7 +437,6 @@ struct ContentView: View {
                     items: series,
                     title: "Series",
                     isLoading: isLoadingVOD,
-                    searchText: $seriesSearchText,
                     onSelectChannel: selectChannel,
                     onReload: {
                         Task {
@@ -479,7 +456,6 @@ struct ContentView: View {
                     baseURL: playlistURL,
                     username: credentials.username,
                     password: credentials.password,
-                    searchText: $favoritesSearchText,
                     onSelectChannel: selectChannel,
                     onSelectMovie: { movieItem in
                         selectChannel(movieItem)
@@ -1180,10 +1156,6 @@ struct ContentView: View {
         selectedChannelID = nil
         activeDetailChannel = nil
         selectedCategory = .all
-        searchText = ""
-        movieSearchText = ""
-        seriesSearchText = ""
-        favoritesSearchText = ""
         playlistMessage = nil
         Task {
             await PlaylistCacheManager.shared.clear(for: deletedCacheKey)
@@ -1360,7 +1332,6 @@ struct ChannelLibraryView: View {
     let categoryCounts: [ChannelCategory: Int]
     @Binding var selectedCategory: ChannelCategory
     @Binding var selectedChannelID: Channel.ID?
-    @Binding var searchText: String
     let isLoading: Bool
     let onSelectChannel: (Channel) -> Void
     let openPlaylistImporter: () -> Void
@@ -1417,9 +1388,10 @@ struct ChannelLibraryView: View {
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                         } else {
-                            NoSearchResultsCard(
-                                searchText: searchText,
-                                clearSearch: { searchText = "" }
+                            ContentUnavailableView(
+                                "No Channels in This Category",
+                                systemImage: "line.3.horizontal.decrease.circle",
+                                description: Text("Choose another category to see more channels.")
                             )
                             .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 24, trailing: 16))
                             .listRowBackground(Color.clear)
@@ -1507,7 +1479,7 @@ struct ChannelLibraryView: View {
                     ChannelSectionHeader(
                         displayedCount: channels.count,
                         totalCount: totalChannelCount,
-                        isFiltered: !searchText.isEmpty || selectedCategory != .all,
+                        isFiltered: selectedCategory != .all,
                         categoryTitle: selectedCategory.rawValue
                     )
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
@@ -1519,9 +1491,6 @@ struct ChannelLibraryView: View {
         .background(tiptvTheme.contentBackground.ignoresSafeArea())
         .navigationTitle("TV Guide")
         .onChange(of: selectedCategory) {
-            displayLimit = 250
-        }
-        .onChange(of: searchText) {
             displayLimit = 250
         }
         .toolbar {
@@ -2941,49 +2910,6 @@ struct EmptyChannelListCard: View {
             }
             .buttonStyle(.plain)
             .padding(.bottom, 8)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(tiptvTheme.cardBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
-                )
-        )
-    }
-}
-
-struct NoSearchResultsCard: View {
-    let searchText: String
-    let clearSearch: () -> Void
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 28, weight: .regular))
-                .foregroundStyle(tiptvTheme.aqua.opacity(0.8))
-                .padding(.top, 8)
-
-            VStack(spacing: 6) {
-                Text("No Matching Channels")
-                    .font(.system(.headline, design: .rounded).weight(.semibold))
-                    .foregroundStyle(.white)
-
-                Text("No channels match “\(searchText)”. Try checking the spelling or picking a different category.")
-                    .font(.system(.subheadline, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-            }
-
-            Button("Clear Search", action: clearSearch)
-                .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                .foregroundStyle(tiptvTheme.aqua)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(tiptvTheme.aqua.opacity(0.12), in: Capsule())
-                .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
         .padding(20)

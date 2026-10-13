@@ -177,7 +177,6 @@ final class SeriesPlaybackManager: ObservableObject {
     /// Builds a Channel model from an XtreamEpisode
     func channel(for episode: XtreamEpisode, series: Channel, coverURL: URL?) -> Channel {
         Channel(
-            id: UUID(),
             name: "\(series.uniformName) S\(episode.season)E\(episode.episodeNum): \(episode.title)",
             uniformName: "\(series.uniformName) S\(episode.season)E\(episode.episodeNum): \(episode.title)",
             group: series.uniformName,

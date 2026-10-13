@@ -30,7 +30,6 @@ struct FavoritesCatalogView: View {
     let baseURL: String
     let username: String
     let password: String
-    @Binding var searchText: String
     let onSelectChannel: (Channel) -> Void
     let onSelectMovie: (Channel) -> Void
     let onPlayEpisode: (Channel) -> Void
@@ -67,7 +66,6 @@ struct FavoritesCatalogView: View {
     private func refreshFavorites() {
         filterTask?.cancel()
         let favoriteURLs = favoritesManager.favoriteStreamURLs
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let currentChannels = channels
         let currentSeries = series
         let currentMovies = movies
@@ -78,18 +76,13 @@ struct FavoritesCatalogView: View {
             let favoriteMovies = ChannelCatalog.favoriteChannels(in: currentMovies, favoriteStreamURLs: favoriteURLs)
             guard !Task.isCancelled else { return }
 
-            let visibleChannels = ChannelCatalog.favoriteChannels(in: favoriteChannels, favoriteStreamURLs: favoriteURLs, query: query)
-            let visibleSeries = ChannelCatalog.favoriteChannels(in: favoriteSeries, favoriteStreamURLs: favoriteURLs, query: query)
-            let visibleMovies = ChannelCatalog.favoriteChannels(in: favoriteMovies, favoriteStreamURLs: favoriteURLs, query: query)
-            guard !Task.isCancelled else { return }
-
             await MainActor.run {
                 allFavoriteChannels = favoriteChannels
                 allFavoriteSeries = favoriteSeries
                 allFavoriteMovies = favoriteMovies
-                filteredChannels = visibleChannels
-                filteredSeries = visibleSeries
-                filteredMovies = visibleMovies
+                filteredChannels = favoriteChannels
+                filteredSeries = favoriteSeries
+                filteredMovies = favoriteMovies
             }
         }
     }
@@ -130,9 +123,6 @@ struct FavoritesCatalogView: View {
         }
         .navigationTitle("Favourites")
         .task {
-            refreshFavorites()
-        }
-        .onChange(of: searchText) { _, _ in
             refreshFavorites()
         }
         .onChange(of: favoritesManager.favoriteStreamURLs) { _, _ in
@@ -238,18 +228,14 @@ struct FavoritesCatalogView: View {
 
     @ViewBuilder
     private var allSectionsView: some View {
-        if filteredChannels.isEmpty && filteredSeries.isEmpty && filteredMovies.isEmpty {
-            noSearchResultsView
-        } else {
-            if !filteredChannels.isEmpty {
-                channelsSectionView(title: "Live TV Channels (\(filteredChannels.count))", showHeader: true)
-            }
-            if !filteredSeries.isEmpty {
-                seriesSectionView(title: "TV Series (\(filteredSeries.count))", showHeader: true)
-            }
-            if !filteredMovies.isEmpty {
-                moviesSectionView(title: "Movies (\(filteredMovies.count))", showHeader: true)
-            }
+        if !filteredChannels.isEmpty {
+            channelsSectionView(title: "Live TV Channels (\(filteredChannels.count))", showHeader: true)
+        }
+        if !filteredSeries.isEmpty {
+            seriesSectionView(title: "TV Series (\(filteredSeries.count))", showHeader: true)
+        }
+        if !filteredMovies.isEmpty {
+            moviesSectionView(title: "Movies (\(filteredMovies.count))", showHeader: true)
         }
     }
 
@@ -498,22 +484,4 @@ struct FavoritesCatalogView: View {
         .padding(.vertical, 24)
     }
 
-    private var noSearchResultsView: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 32))
-                .foregroundStyle(.white.opacity(0.3))
-                .padding(.top, 24)
-
-            Text("No Favourites Found")
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
-
-            Text("No favourites match '\(searchText)'.")
-                .font(.system(size: 12, design: .rounded))
-                .foregroundStyle(.white.opacity(0.5))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
-    }
 }
