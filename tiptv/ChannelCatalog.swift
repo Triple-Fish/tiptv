@@ -6,7 +6,15 @@ enum ChannelCatalog {
         hiddenStreamURLs: Set<String>
     ) -> [Channel] {
         guard !hiddenStreamURLs.isEmpty else { return channels }
-        return channels.filter { !hiddenStreamURLs.contains($0.streamURLString) }
+        var result: [Channel] = []
+        result.reserveCapacity(channels.count)
+        for (index, channel) in channels.enumerated() {
+            if index.isMultiple(of: 1_000), Task.isCancelled { return [] }
+            if !hiddenStreamURLs.contains(channel.streamURLString) {
+                result.append(channel)
+            }
+        }
+        return result
     }
 
     nonisolated static func filteredChannels(
@@ -19,14 +27,20 @@ enum ChannelCatalog {
         if category == .all && normalizedQuery.isEmpty {
             return channels
         }
-        return channels.filter { channel in
+        var result: [Channel] = []
+        result.reserveCapacity(channels.count)
+        for (index, channel) in channels.enumerated() {
+            if index.isMultiple(of: 1_000), Task.isCancelled { return [] }
             if category == .favorites {
-                guard favoriteStreamURLs.contains(channel.streamURLString) else { return false }
+                guard favoriteStreamURLs.contains(channel.streamURLString) else { continue }
             } else if category != .all && channel.category != category {
-                return false
+                continue
             }
-            return normalizedQuery.isEmpty || channel.searchKey.contains(normalizedQuery)
+            if normalizedQuery.isEmpty || channel.searchKey.contains(normalizedQuery) {
+                result.append(channel)
+            }
         }
+        return result
     }
 
     nonisolated static func favoriteChannels(
@@ -36,13 +50,16 @@ enum ChannelCatalog {
     ) -> [Channel] {
         guard !favoriteStreamURLs.isEmpty else { return [] }
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalizedQuery.isEmpty {
-            return channels.filter { favoriteStreamURLs.contains($0.streamURLString) }
+        var result: [Channel] = []
+        result.reserveCapacity(min(channels.count, favoriteStreamURLs.count))
+        for (index, channel) in channels.enumerated() {
+            if index.isMultiple(of: 1_000), Task.isCancelled { return [] }
+            if favoriteStreamURLs.contains(channel.streamURLString),
+               (normalizedQuery.isEmpty || channel.searchKey.contains(normalizedQuery)) {
+                result.append(channel)
+            }
         }
-        return channels.filter { channel in
-            favoriteStreamURLs.contains(channel.streamURLString)
-                && (normalizedQuery.isEmpty || channel.searchKey.contains(normalizedQuery))
-        }
+        return result
     }
 
     nonisolated static func videoChannels(
@@ -55,13 +72,19 @@ enum ChannelCatalog {
         if group == nil && pathExtension == nil && normalizedQuery.isEmpty {
             return channels
         }
-        return channels.filter { channel in
-            if let group, channel.group != group { return false }
+        var result: [Channel] = []
+        result.reserveCapacity(channels.count)
+        for (index, channel) in channels.enumerated() {
+            if index.isMultiple(of: 1_000), Task.isCancelled { return [] }
+            if let group, channel.group != group { continue }
             if let pathExtension,
                channel.streamURL.pathExtension.caseInsensitiveCompare(pathExtension) != .orderedSame {
-                return false
+                continue
             }
-            return normalizedQuery.isEmpty || channel.searchKey.contains(normalizedQuery)
+            if normalizedQuery.isEmpty || channel.searchKey.contains(normalizedQuery) {
+                result.append(channel)
+            }
         }
+        return result
     }
 }

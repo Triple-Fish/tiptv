@@ -65,22 +65,25 @@ struct MoviesCatalogView: View {
         let isMovies = (title == "Movies")
 
         filterTask?.cancel()
-        filterTask = Task.detached(priority: .userInitiated) {
+        filterTask = Task {
+            let work = Task.detached(priority: .userInitiated) {
             let requiredExtension: String? = isMovies && format != .all ? format.rawValue.lowercased() : nil
             let requiredGroup = grp == "All" ? nil : grp
-            let result = ChannelCatalog.videoChannels(
+                return ChannelCatalog.videoChannels(
                 in: currentItems,
                 group: requiredGroup,
                 pathExtension: requiredExtension,
                 query: ""
             )
+            }
+            let result = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
 
             guard !Task.isCancelled else { return }
-
-            let finalResult = result
-            await MainActor.run {
-                self.filteredItems = finalResult
-            }
+            self.filteredItems = result
         }
     }
 

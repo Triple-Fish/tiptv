@@ -56,9 +56,14 @@ private final class UnifiedSearchModel {
             return
         }
 
-        let result = await Task.detached(priority: .userInitiated) {
+        let work = Task.detached(priority: .userInitiated) {
             Self.performSearch(query: trimmed, channels: channels, movies: movies, series: series, programs: programs)
-        }.value
+        }
+        guard let result = await withTaskCancellationHandler(operation: {
+            await work.value
+        }, onCancel: {
+            work.cancel()
+        }) else { return }
 
         guard !Task.isCancelled else { return }
         liveResults = result.0
@@ -74,24 +79,18 @@ private final class UnifiedSearchModel {
         movies: [Channel],
         series: [Channel],
         programs: [UUID: [EPGProgram]]
-    ) -> ([UnifiedSearchResult], [UnifiedSearchResult], [UnifiedSearchResult], [UnifiedSearchResult]) {
+    ) -> ([UnifiedSearchResult], [UnifiedSearchResult], [UnifiedSearchResult], [UnifiedSearchResult])? {
             let normalizedQuery = query.lowercased()
-            let live = channels.lazy
-                .filter { !$0.isVOD && Self.matches($0, query: normalizedQuery) }
-                .prefix(60)
-                .map { UnifiedSearchResult(id: "live-\($0.id)", kind: .live, title: $0.uniformName, subtitle: $0.group ?? "Live TV", channel: $0) }
-            let movieMatches = movies.lazy
-                .filter { Self.matches($0, query: normalizedQuery) }
-                .prefix(60)
-                .map { UnifiedSearchResult(id: "movie-\($0.id)", kind: .movie, title: $0.uniformName, subtitle: $0.group ?? "Movie", channel: $0) }
-            let seriesMatches = series.lazy
-                .filter { Self.matches($0, query: normalizedQuery) }
-                .prefix(60)
-                .map { UnifiedSearchResult(id: "series-\($0.id)", kind: .series, title: $0.uniformName, subtitle: $0.group ?? "Series", channel: $0) }
+            guard let live = channelResults(in: channels, query: normalizedQuery, kind: .live, fallbackSubtitle: "Live TV", liveOnly: true),
+                  let movieMatches = channelResults(in: movies, query: normalizedQuery, kind: .movie, fallbackSubtitle: "Movie"),
+                  let seriesMatches = channelResults(in: series, query: normalizedQuery, kind: .series, fallbackSubtitle: "Series") else {
+                return nil
+            }
 
             let channelsByID = Dictionary(uniqueKeysWithValues: channels.map { ($0.id, $0) })
             var programmeMatches: [UnifiedSearchResult] = []
             for (channelID, channelPrograms) in programs {
+                if Task.isCancelled { return nil }
                 if programmeMatches.count >= 60 { break }
                 guard let channel = channelsByID[channelID] else { continue }
                 for programme in channelPrograms where programmeMatches.count < 60 {
@@ -109,7 +108,32 @@ private final class UnifiedSearchModel {
                 }
             }
             programmeMatches.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-            return (Array(live), programmeMatches, Array(movieMatches), Array(seriesMatches))
+            return (live, programmeMatches, movieMatches, seriesMatches)
+    }
+
+    nonisolated private static func channelResults(
+        in channels: [Channel],
+        query: String,
+        kind: UnifiedSearchKind,
+        fallbackSubtitle: String,
+        liveOnly: Bool = false
+    ) -> [UnifiedSearchResult]? {
+        var results: [UnifiedSearchResult] = []
+        results.reserveCapacity(60)
+        for (index, channel) in channels.enumerated() {
+            if index.isMultiple(of: 1_000), Task.isCancelled { return nil }
+            if liveOnly && channel.isVOD { continue }
+            guard matches(channel, query: query) else { continue }
+            results.append(UnifiedSearchResult(
+                id: "\(kind.rawValue)-\(channel.id)",
+                kind: kind,
+                title: channel.uniformName,
+                subtitle: channel.group ?? fallbackSubtitle,
+                channel: channel
+            ))
+            if results.count == 60 { break }
+        }
+        return results
     }
 
     nonisolated private static func matches(_ channel: Channel, query: String) -> Bool {

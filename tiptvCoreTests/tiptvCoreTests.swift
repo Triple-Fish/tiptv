@@ -81,6 +81,36 @@ struct PlaylistAndCatalogTests {
         #expect(favorites == [news])
     }
 
+    @Test func `Catalog fast paths preserve filtering results`() throws {
+        let news = try makeChannel(name: "World News", url: "https://example.com/news.m3u8", category: .news)
+        let sport = try makeChannel(name: "Live Sport", url: "https://example.com/sport.m3u8", category: .sports)
+        let movie = try makeChannel(name: "Example Movie", url: "https://example.com/movie.mp4", category: .movies)
+        let channels = [news, sport, movie]
+
+        #expect(ChannelCatalog.filteredChannels(
+            in: channels,
+            category: .all,
+            favoriteStreamURLs: [],
+            query: ""
+        ) == channels)
+        #expect(ChannelCatalog.favoriteChannels(
+            in: channels,
+            favoriteStreamURLs: [sport.streamURLString]
+        ) == [sport])
+        #expect(ChannelCatalog.videoChannels(
+            in: channels,
+            group: nil,
+            pathExtension: nil,
+            query: ""
+        ) == channels)
+        #expect(ChannelCatalog.videoChannels(
+            in: channels,
+            group: nil,
+            pathExtension: "mp4",
+            query: ""
+        ) == [movie])
+    }
+
     @Test(arguments: [1_000, 10_000, 50_000])
     func `Large playlists parse completely`(channelCount: Int) {
         var lines = [String]()

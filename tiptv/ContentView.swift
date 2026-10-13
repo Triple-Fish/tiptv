@@ -92,6 +92,7 @@ struct ContentView: View {
     @State private var catalogRefreshTask: Task<Void, Never>?
     @State private var channelFilterTask: Task<Void, Never>?
     @State private var epgLoadTask: Task<Void, Never>?
+    @State private var loadGeneration = UUID()
 
     private func updateVisibleChannels() {
         catalogRefreshTask?.cancel()
@@ -101,7 +102,7 @@ struct ContentView: View {
         let category = selectedCategory
 
         catalogRefreshTask = Task {
-            let snapshot = await Task.detached(priority: .userInitiated) {
+            let work = Task.detached(priority: .userInitiated) {
                 let visible = ChannelCatalog.visibleChannels(
                     in: currentChannels,
                     hiddenStreamURLs: hiddenURLs
@@ -141,7 +142,12 @@ struct ContentView: View {
                     categoryCounts: counts,
                     availableCategories: categories
                 )
-            }.value
+            }
+            let snapshot = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
 
             guard !Task.isCancelled else { return }
             visibleChannels = snapshot.visibleChannels
@@ -157,14 +163,19 @@ struct ContentView: View {
         let category = selectedCategory
         let favoriteURLs = favoritesManager.favoriteStreamURLs
         channelFilterTask = Task {
-            let filtered = await Task.detached(priority: .userInitiated) {
+            let work = Task.detached(priority: .userInitiated) {
                 ChannelCatalog.filteredChannels(
                     in: currentChannels,
                     category: category,
                     favoriteStreamURLs: favoriteURLs,
                     query: ""
                 )
-            }.value
+            }
+            let filtered = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
             guard !Task.isCancelled else { return }
             filteredChannels = filtered
         }
@@ -964,21 +975,31 @@ struct ContentView: View {
 
     private func loadVODContent(forceRefresh: Bool = false) async {
         guard !isLoadingVOD else { return }
+        let generation = loadGeneration
+        let cacheKey = playlistCacheKey
+        let baseURL = playlistURL
+        let username = credentials.username
+        let password = credentials.password
         isLoadingVOD = true
-        defer { isLoadingVOD = false }
+        defer {
+            if loadGeneration == generation {
+                isLoadingVOD = false
+            }
+        }
 
         if !forceRefresh {
-            async let cachedMovies = PlaylistCacheManager.shared.loadCachedMovies(for: playlistCacheKey)
-            async let cachedSeries = PlaylistCacheManager.shared.loadCachedSeries(for: playlistCacheKey)
+            async let cachedMovies = PlaylistCacheManager.shared.loadCachedMovies(for: cacheKey)
+            async let cachedSeries = PlaylistCacheManager.shared.loadCachedSeries(for: cacheKey)
             if let cachedMovieItems = await cachedMovies,
                let cachedSeriesItems = await cachedSeries {
+                guard loadGeneration == generation else { return }
                 movies = cachedMovieItems
                 series = cachedSeriesItems
                 return
             }
         }
 
-        guard !credentials.username.isEmpty && !credentials.password.isEmpty else {
+        guard !username.isEmpty && !password.isEmpty else {
             let currentChannels = channels
             let (m, s) = await Task.detached(priority: .userInitiated) {
                 let movies = currentChannels.filter { ch in
@@ -1016,22 +1037,26 @@ struct ContentView: View {
                 }
                 return (movies, series)
             }.value
+            guard loadGeneration == generation else { return }
             self.movies = m
             self.series = s
-            await PlaylistCacheManager.shared.saveMovies(m, for: playlistCacheKey)
-            await PlaylistCacheManager.shared.saveSeries(s, for: playlistCacheKey)
+            await PlaylistCacheManager.shared.saveMovies(m, for: cacheKey)
+            await PlaylistCacheManager.shared.saveSeries(s, for: cacheKey)
             return
         }
 
         // Fetch movies first and update UI immediately so user gets content right away
-        let m = await XtreamService.fetchXtreamVOD(baseURL: playlistURL, username: credentials.username, password: credentials.password)
+        let m = await XtreamService.fetchXtreamVOD(baseURL: baseURL, username: username, password: password)
+        guard loadGeneration == generation else { return }
         self.movies = m
-        await PlaylistCacheManager.shared.saveMovies(m, for: playlistCacheKey)
+        await PlaylistCacheManager.shared.saveMovies(m, for: cacheKey)
+        guard loadGeneration == generation else { return }
 
         // Then fetch series sequentially to prevent simultaneous RAM spikes
-        let s = await XtreamService.fetchXtreamSeries(baseURL: playlistURL, username: credentials.username, password: credentials.password)
+        let s = await XtreamService.fetchXtreamSeries(baseURL: baseURL, username: username, password: password)
+        guard loadGeneration == generation else { return }
         self.series = s
-        await PlaylistCacheManager.shared.saveSeries(s, for: playlistCacheKey)
+        await PlaylistCacheManager.shared.saveSeries(s, for: cacheKey)
     }
 
     private func loadPlaylist() async {
@@ -1041,29 +1066,37 @@ struct ContentView: View {
             return
         }
 
+        let generation = loadGeneration
+        let sourceURL = playlistURL
+        let username = credentials.username
+        let password = credentials.password
+        let cacheKey = playlistCacheKey
         isLoadingPlaylist = true
         playlistMessage = "Connecting to your provider…"
 
         do {
             // 1. Check if this is an Xtream Codes server (server URL + username + password)
-            if !credentials.username.isEmpty && !credentials.password.isEmpty {
+            if !username.isEmpty && !password.isEmpty {
                 let isXtream = await XtreamService.isXtreamServer(
-                    baseURL: playlistURL,
-                    username: credentials.username,
-                    password: credentials.password
+                    baseURL: sourceURL,
+                    username: username,
+                    password: password
                 )
+                guard loadGeneration == generation else { return }
                 if isXtream {
                     playlistMessage = "Downloading live channels…"
                     let xtreamChannels = try await XtreamService.fetchXtreamChannels(
-                        baseURL: playlistURL,
-                        username: credentials.username,
-                        password: credentials.password
+                        baseURL: sourceURL,
+                        username: username,
+                        password: password
                     )
+                    guard loadGeneration == generation else { return }
                     channels = xtreamChannels
                     updateVisibleChannels()
                     selectedCategory = .all
                     playlistMessage = "\(xtreamChannels.count) channels loaded."
-                    await PlaylistCacheManager.shared.saveChannels(xtreamChannels, for: playlistCacheKey)
+                    await PlaylistCacheManager.shared.saveChannels(xtreamChannels, for: cacheKey)
+                    guard loadGeneration == generation else { return }
                     persistCurrentProfile()
                     loadProgrammeGuide(for: xtreamChannels, force: true)
                     activeSheet = nil
@@ -1080,8 +1113,8 @@ struct ContentView: View {
             request.timeoutInterval = 45
             request.setValue(XtreamService.defaultUserAgent, forHTTPHeaderField: "User-Agent")
 
-            if !credentials.username.isEmpty || !credentials.password.isEmpty {
-                let credentialString = "\(credentials.username):\(credentials.password)"
+            if !username.isEmpty || !password.isEmpty {
+                let credentialString = "\(username):\(password)"
                 if let credentialData = credentialString.data(using: .utf8) {
                     let base64Credential = credentialData.base64EncodedString()
                     request.setValue("Basic \(base64Credential)", forHTTPHeaderField: "Authorization")
@@ -1090,6 +1123,7 @@ struct ContentView: View {
 
             let (tempFileURL, response) = try await URLSession.shared.download(for: request)
             defer { try? FileManager.default.removeItem(at: tempFileURL) }
+            guard loadGeneration == generation else { return }
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw PlaylistError.unavailable
@@ -1105,6 +1139,7 @@ struct ContentView: View {
 
             playlistMessage = "Reading playlist…"
             let importedChannels = try await PlaylistParser.channels(fromFileURL: tempFileURL)
+            guard loadGeneration == generation else { return }
             guard !importedChannels.isEmpty else {
                 throw PlaylistError.noChannels
             }
@@ -1113,11 +1148,13 @@ struct ContentView: View {
             updateVisibleChannels()
             selectedCategory = .all
             playlistMessage = "\(importedChannels.count) channels loaded."
-            await PlaylistCacheManager.shared.saveChannels(importedChannels, for: playlistCacheKey)
+            await PlaylistCacheManager.shared.saveChannels(importedChannels, for: cacheKey)
+            guard loadGeneration == generation else { return }
             persistCurrentProfile()
             loadProgrammeGuide(for: importedChannels, force: true)
             activeSheet = nil
         } catch {
+            guard loadGeneration == generation else { return }
             if channels.isEmpty, await restoreCachedContent() {
                 playlistMessage = "The provider could not be reached. Your saved channels are still available."
             } else {
@@ -1125,11 +1162,16 @@ struct ContentView: View {
             }
         }
 
-        isLoadingPlaylist = false
+        if loadGeneration == generation {
+            isLoadingPlaylist = false
+        }
     }
 
     private func deletePlaylist() {
         stopPlayback()
+        loadGeneration = UUID()
+        isLoadingPlaylist = false
+        isLoadingVOD = false
         let deletedCacheKey = playlistCacheKey
         let deletedProfileID = profileStore.selectedProfileID
         profileStore.deleteSelected()
@@ -1168,7 +1210,10 @@ struct ContentView: View {
     }
 
     private func restoreCachedContent() async -> Bool {
-        guard let cachedChannels = await PlaylistCacheManager.shared.loadCachedChannels(for: playlistCacheKey),
+        let generation = loadGeneration
+        let cacheKey = playlistCacheKey
+        guard let cachedChannels = await PlaylistCacheManager.shared.loadCachedChannels(for: cacheKey),
+              loadGeneration == generation,
               !cachedChannels.isEmpty else {
             return false
         }
@@ -1179,10 +1224,13 @@ struct ContentView: View {
         playlistMessage = "\(cachedChannels.count) cached channels loaded."
         loadProgrammeGuide(for: cachedChannels)
 
-        async let cachedMovies = PlaylistCacheManager.shared.loadCachedMovies(for: playlistCacheKey)
-        async let cachedSeries = PlaylistCacheManager.shared.loadCachedSeries(for: playlistCacheKey)
-        movies = await cachedMovies ?? []
-        series = await cachedSeries ?? []
+        async let cachedMovies = PlaylistCacheManager.shared.loadCachedMovies(for: cacheKey)
+        async let cachedSeries = PlaylistCacheManager.shared.loadCachedSeries(for: cacheKey)
+        let restoredMovies = await cachedMovies ?? []
+        let restoredSeries = await cachedSeries ?? []
+        guard loadGeneration == generation else { return false }
+        movies = restoredMovies
+        series = restoredSeries
         return true
     }
 
@@ -1240,6 +1288,10 @@ struct ContentView: View {
     }
 
     private func selectProfile(_ profile: PlaylistProfile) {
+        loadGeneration = UUID()
+        isLoadingPlaylist = false
+        isLoadingVOD = false
+        epgLoadTask?.cancel()
         profileStore.select(profile)
         playlistURL = profile.playlistURL
         epgURL = profile.epgURL

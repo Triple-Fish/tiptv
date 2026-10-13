@@ -66,11 +66,12 @@ private struct XMLTVDocument: Sendable {
     let channelNames: [String: [String]]
     let rawPrograms: [XMLTVRawProgram]
 
-    nonisolated func match(channels: [Channel], overrides: [String: String]) -> XMLTVMatchResult {
+    nonisolated func match(channels: [Channel], overrides: [String: String]) -> XMLTVMatchResult? {
         var lookup: [String: UUID] = [:]
         var sourceByChannelID: [UUID: String] = [:]
 
-        for channel in channels where !channel.isVOD {
+        for (index, channel) in channels.enumerated() where !channel.isVOD {
+            if index.isMultiple(of: 1_000), Task.isCancelled { return nil }
             if let override = overrides[channel.streamURLString] {
                 lookup[Self.key(override)] = channel.id
                 sourceByChannelID[channel.id] = override
@@ -82,7 +83,9 @@ private struct XMLTVDocument: Sendable {
             lookup[Self.key(channel.uniformName)] = channel.id
         }
 
-        for (externalID, names) in channelNames {
+        for (index, source) in channelNames.enumerated() {
+            if index.isMultiple(of: 1_000), Task.isCancelled { return nil }
+            let (externalID, names) = source
             if let channelID = lookup[Self.key(externalID)] ?? names.lazy.compactMap({ lookup[Self.key($0)] }).first {
                 lookup[Self.key(externalID)] = channelID
                 sourceByChannelID[channelID] = externalID
@@ -90,7 +93,8 @@ private struct XMLTVDocument: Sendable {
         }
 
         var programs: [UUID: [EPGProgram]] = [:]
-        for raw in rawPrograms {
+        for (index, raw) in rawPrograms.enumerated() {
+            if index.isMultiple(of: 1_000), Task.isCancelled { return nil }
             guard let channelID = lookup[Self.key(raw.externalChannelID)] else { continue }
             sourceByChannelID[channelID] = raw.externalChannelID
             let stableKey = "\(channelID.uuidString)|\(raw.start.timeIntervalSince1970)|\(raw.title)"
@@ -168,15 +172,19 @@ final class EPGManager {
     }
 
     func load(from url: URL, channels: [Channel], force: Bool = false) async {
+        let loadID = UUID()
+        activeLoadID = loadID
         if !force, sourceURL == url, let lastUpdated, Date().timeIntervalSince(lastUpdated) < 6 * 60 * 60 {
-            if currentChannels.map(\.id) != channels.map(\.id), let currentDocument {
-                await apply(document: currentDocument, channels: channels)
+            if !currentChannels.elementsEqual(channels, by: { $0.id == $1.id }), let currentDocument {
+                await apply(document: currentDocument, channels: channels, expectedLoadID: loadID)
+            }
+            if activeLoadID == loadID {
+                activeLoadID = nil
+                isLoading = false
             }
             return
         }
 
-        let loadID = UUID()
-        activeLoadID = loadID
         isLoading = true
         errorMessage = nil
 
@@ -188,14 +196,19 @@ final class EPGManager {
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 throw URLError(.badServerResponse)
             }
-            let document = try await Task.detached(priority: .userInitiated) {
+            let parseTask = Task.detached(priority: .userInitiated) {
                 try XMLTVParser.parse(fileURL: temporaryURL)
-            }.value
+            }
+            let document = try await withTaskCancellationHandler {
+                try await parseTask.value
+            } onCancel: {
+                parseTask.cancel()
+            }
             guard activeLoadID == loadID, !Task.isCancelled else { return }
             currentDocument = document
             sourceURL = url
             lastUpdated = Date()
-            await apply(document: document, channels: channels)
+            await apply(document: document, channels: channels, expectedLoadID: loadID)
         } catch is CancellationError {
             // A newer load has superseded this request.
         } catch {
@@ -237,12 +250,22 @@ final class EPGManager {
         isLoading = false
     }
 
-    private func apply(document: XMLTVDocument, channels: [Channel]) async {
+    private func apply(
+        document: XMLTVDocument,
+        channels: [Channel],
+        expectedLoadID: UUID? = nil
+    ) async {
         let overrides = overrides
-        let result = await Task.detached(priority: .userInitiated) {
+        let matchTask = Task.detached(priority: .userInitiated) {
             document.match(channels: channels, overrides: overrides)
-        }.value
-        guard !Task.isCancelled else { return }
+        }
+        guard let result = await withTaskCancellationHandler(operation: {
+            await matchTask.value
+        }, onCancel: {
+            matchTask.cancel()
+        }) else { return }
+        guard !Task.isCancelled,
+              expectedLoadID == nil || activeLoadID == expectedLoadID else { return }
         currentChannels = channels
         programsByChannelID = result.programs
         sourceChannels = result.sources
@@ -267,6 +290,7 @@ nonisolated final class XMLTVParser: NSObject, XMLParserDelegate, @unchecked Sen
     private var currentChannelID: String?
     private var currentProgram: XMLTVRawProgram?
     private var text = ""
+    private var parsedElementCount = 0
     private let dateFormatters: [DateFormatter] = {
         ["yyyyMMddHHmmss Z", "yyyyMMddHHmm Z", "yyyyMMddHHmmss", "yyyyMMddHHmm"].map { pattern in
             let formatter = DateFormatter()
@@ -280,11 +304,27 @@ nonisolated final class XMLTVParser: NSObject, XMLParserDelegate, @unchecked Sen
         guard let parser = XMLParser(contentsOf: fileURL) else { throw URLError(.cannotParseResponse) }
         let delegate = XMLTVParser()
         parser.delegate = delegate
-        guard parser.parse() else { throw parser.parserError ?? URLError(.cannotParseResponse) }
+        guard parser.parse() else {
+            if Task.isCancelled { throw CancellationError() }
+            throw parser.parserError ?? URLError(.cannotParseResponse)
+        }
         return XMLTVDocument(channelNames: delegate.channelNames, rawPrograms: delegate.rawPrograms)
     }
 
+    nonisolated static func parse(fileURL: URL, channels: [Channel]) throws -> [UUID: [EPGProgram]] {
+        let document = try parse(fileURL: fileURL)
+        guard let result = document.match(channels: channels, overrides: [:]) else {
+            throw CancellationError()
+        }
+        return result.programs
+    }
+
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+        parsedElementCount += 1
+        if parsedElementCount.isMultiple(of: 1_000), Task.isCancelled {
+            parser.abortParsing()
+            return
+        }
         text = ""
         if elementName == "channel" {
             currentChannelID = attributeDict["id"]

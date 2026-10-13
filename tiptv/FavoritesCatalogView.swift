@@ -70,20 +70,26 @@ struct FavoritesCatalogView: View {
         let currentSeries = series
         let currentMovies = movies
 
-        filterTask = Task.detached(priority: .userInitiated) {
-            let favoriteChannels = ChannelCatalog.favoriteChannels(in: currentChannels, favoriteStreamURLs: favoriteURLs)
-            let favoriteSeries = ChannelCatalog.favoriteChannels(in: currentSeries, favoriteStreamURLs: favoriteURLs)
-            let favoriteMovies = ChannelCatalog.favoriteChannels(in: currentMovies, favoriteStreamURLs: favoriteURLs)
+        filterTask = Task {
+            let work = Task.detached(priority: .userInitiated) {
+                let favoriteChannels = ChannelCatalog.favoriteChannels(in: currentChannels, favoriteStreamURLs: favoriteURLs)
+                let favoriteSeries = ChannelCatalog.favoriteChannels(in: currentSeries, favoriteStreamURLs: favoriteURLs)
+                let favoriteMovies = ChannelCatalog.favoriteChannels(in: currentMovies, favoriteStreamURLs: favoriteURLs)
+                return (favoriteChannels, favoriteSeries, favoriteMovies)
+            }
+            let (favoriteChannels, favoriteSeries, favoriteMovies) = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
             guard !Task.isCancelled else { return }
 
-            await MainActor.run {
-                allFavoriteChannels = favoriteChannels
-                allFavoriteSeries = favoriteSeries
-                allFavoriteMovies = favoriteMovies
-                filteredChannels = favoriteChannels
-                filteredSeries = favoriteSeries
-                filteredMovies = favoriteMovies
-            }
+            allFavoriteChannels = favoriteChannels
+            allFavoriteSeries = favoriteSeries
+            allFavoriteMovies = favoriteMovies
+            filteredChannels = favoriteChannels
+            filteredSeries = favoriteSeries
+            filteredMovies = favoriteMovies
         }
     }
 
