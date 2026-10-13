@@ -149,7 +149,7 @@ final class EPGManager {
         overrides = UserDefaults.standard.dictionary(forKey: overridesKey) as? [String: String] ?? [:]
     }
 
-    func programs(for channel: Channel, date: Date = Date()) -> [EPGProgram] {
+    func programs(for channel: Channel) -> [EPGProgram] {
         programsByChannelID[channel.id] ?? []
     }
 

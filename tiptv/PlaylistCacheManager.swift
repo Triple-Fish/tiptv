@@ -63,14 +63,14 @@ actor PlaylistCacheManager {
         guard !channels.isEmpty, !urlString.isEmpty else { return }
         let fileURL = channelsURL(for: urlString)
         do {
-                let encoder = PropertyListEncoder()
-                encoder.outputFormat = .binary
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
             let data = try encoder.encode(makeEnvelope(channels))
-                try data.write(to: fileURL, options: .atomic)
+            try data.write(to: fileURL, options: .atomic)
         } catch {
-                #if DEBUG
-                print("[PlaylistCacheManager] Failed to cache channels: \(error)")
-                #endif
+            #if DEBUG
+            print("[PlaylistCacheManager] Failed to cache channels: \(error)")
+            #endif
         }
     }
 
@@ -78,14 +78,14 @@ actor PlaylistCacheManager {
         guard !movies.isEmpty, !urlString.isEmpty else { return }
         let fileURL = moviesURL(for: urlString)
         do {
-                let encoder = PropertyListEncoder()
-                encoder.outputFormat = .binary
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
             let data = try encoder.encode(makeEnvelope(movies))
-                try data.write(to: fileURL, options: .atomic)
+            try data.write(to: fileURL, options: .atomic)
         } catch {
-                #if DEBUG
-                print("[PlaylistCacheManager] Failed to cache movies: \(error)")
-                #endif
+            #if DEBUG
+            print("[PlaylistCacheManager] Failed to cache movies: \(error)")
+            #endif
         }
     }
 
@@ -93,14 +93,14 @@ actor PlaylistCacheManager {
         guard !series.isEmpty, !urlString.isEmpty else { return }
         let fileURL = seriesURL(for: urlString)
         do {
-                let encoder = PropertyListEncoder()
-                encoder.outputFormat = .binary
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
             let data = try encoder.encode(makeEnvelope(series))
-                try data.write(to: fileURL, options: .atomic)
+            try data.write(to: fileURL, options: .atomic)
         } catch {
-                #if DEBUG
-                print("[PlaylistCacheManager] Failed to cache series: \(error)")
-                #endif
+            #if DEBUG
+            print("[PlaylistCacheManager] Failed to cache series: \(error)")
+            #endif
         }
     }
 

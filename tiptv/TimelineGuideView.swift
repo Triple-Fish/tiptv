@@ -5,10 +5,14 @@ struct TimelineGuideView: View {
     let onSelectChannel: (Channel) -> Void
     @State private var epg = EPGManager.shared
     @State private var reminders = ProgrammeReminderManager.shared
+    @State private var timelineStart = Self.currentHourStart()
 
     private let channelWidth: CGFloat = 132
     private let halfHourWidth: CGFloat = 140
-    private var timelineStart: Date { Calendar.current.dateInterval(of: .hour, for: Date())?.start ?? Date() }
+
+    private static func currentHourStart() -> Date {
+        Calendar.current.dateInterval(of: .hour, for: Date())?.start ?? Date()
+    }
 
     var body: some View {
         if channels.isEmpty {
@@ -33,7 +37,9 @@ struct TimelineGuideView: View {
             .navigationTitle("TV Guide")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Now", systemImage: "location.fill") { }
+                    Button("Now", systemImage: "location.fill") {
+                        timelineStart = Self.currentHourStart()
+                    }
                         .accessibilityHint("Returns the guide to the current time")
                 }
             }
@@ -59,12 +65,16 @@ struct TimelineGuideView: View {
     }
 
     private func guideRow(_ channel: Channel) -> some View {
-        let programs = epg.programs(for: channel).filter { $0.endTime > timelineStart && $0.startTime < timelineStart.addingTimeInterval(4 * 3600) }
+        let allPrograms = epg.programs(for: channel)
+        let timelineEnd = timelineStart.addingTimeInterval(4 * 3600)
+        let programs = allPrograms.filter { $0.endTime > timelineStart && $0.startTime < timelineEnd }
+        let now = Date()
+        let currentProgram = allPrograms.first { $0.startTime <= now && $0.endTime >= now }
         return HStack(spacing: 0) {
             Button { onSelectChannel(channel) } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(channel.uniformName).font(.subheadline.weight(.semibold)).lineLimit(2)
-                    if let current = epg.currentProgram(for: channel) {
+                    if let current = currentProgram {
                         Text(current.title).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }

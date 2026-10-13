@@ -16,6 +16,9 @@ enum ChannelCatalog {
         query: String
     ) -> [Channel] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if category == .all && normalizedQuery.isEmpty {
+            return channels
+        }
         return channels.filter { channel in
             if category == .favorites {
                 guard favoriteStreamURLs.contains(channel.streamURLString) else { return false }
@@ -31,7 +34,11 @@ enum ChannelCatalog {
         favoriteStreamURLs: Set<String>,
         query: String = ""
     ) -> [Channel] {
+        guard !favoriteStreamURLs.isEmpty else { return [] }
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedQuery.isEmpty {
+            return channels.filter { favoriteStreamURLs.contains($0.streamURLString) }
+        }
         return channels.filter { channel in
             favoriteStreamURLs.contains(channel.streamURLString)
                 && (normalizedQuery.isEmpty || channel.searchKey.contains(normalizedQuery))
@@ -45,6 +52,9 @@ enum ChannelCatalog {
         query: String
     ) -> [Channel] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if group == nil && pathExtension == nil && normalizedQuery.isEmpty {
+            return channels
+        }
         return channels.filter { channel in
             if let group, channel.group != group { return false }
             if let pathExtension,
