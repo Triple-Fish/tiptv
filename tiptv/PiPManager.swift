@@ -6,13 +6,9 @@
 import AVKit
 import Combine
 import Foundation
+import OSLog
 import SwiftUI
-
-#if canImport(UIKit)
-  import UIKit
-#elseif canImport(AppKit)
-  import AppKit
-#endif
+import UIKit
 
 @MainActor
 final class PiPManager: NSObject, ObservableObject, AVPictureInPictureControllerDelegate {
@@ -103,103 +99,52 @@ final class PiPManager: NSObject, ObservableObject, AVPictureInPictureController
     failedToStartPictureInPictureWithError error: Error
   ) {
     isPiPActive = false
-    print("PiP failed to start: \(error.localizedDescription)")
+    AppLog.playback.error("PiP failed to start: \(error.localizedDescription, privacy: .public)")
   }
 }
 
-// MARK: - Cross-Platform PiP Video Player Representable
+// MARK: - iPhone PiP Video Player Representable
 
-#if canImport(UIKit)
-  struct PiPVideoPlayer: UIViewRepresentable {
-    let player: AVPlayer
-    var isAspectFill: Bool = false
+struct PiPVideoPlayer: UIViewRepresentable {
+  let player: AVPlayer
+  var isAspectFill: Bool = false
 
-    func makeUIView(context: Context) -> PlayerUIView {
-      let view = PlayerUIView()
-      view.playerLayer.player = player
-      view.playerLayer.videoGravity = isAspectFill ? .resizeAspectFill : .resizeAspect
-      PiPManager.shared.setup(with: view.playerLayer)
-      return view
-    }
-
-    func updateUIView(_ uiView: PlayerUIView, context: Context) {
-      if uiView.playerLayer.player !== player {
-        uiView.playerLayer.player = player
-        PiPManager.shared.setup(with: uiView.playerLayer)
-      }
-      uiView.playerLayer.videoGravity = isAspectFill ? .resizeAspectFill : .resizeAspect
-    }
-
-    static func dismantleUIView(_ uiView: PlayerUIView, coordinator: ()) {
-      uiView.playerLayer.player = nil
-    }
+  func makeUIView(context: Context) -> PlayerUIView {
+    let view = PlayerUIView()
+    view.playerLayer.player = player
+    view.playerLayer.videoGravity = isAspectFill ? .resizeAspectFill : .resizeAspect
+    PiPManager.shared.setup(with: view.playerLayer)
+    return view
   }
 
-  final class PlayerUIView: UIView {
-    override static var layerClass: AnyClass {
-      AVPlayerLayer.self
+  func updateUIView(_ uiView: PlayerUIView, context: Context) {
+    if uiView.playerLayer.player !== player {
+      uiView.playerLayer.player = player
+      PiPManager.shared.setup(with: uiView.playerLayer)
     }
-
-    var playerLayer: AVPlayerLayer {
-      layer as! AVPlayerLayer
-    }
-
-    override init(frame: CGRect) {
-      super.init(frame: frame)
-      backgroundColor = .black
-    }
-
-    required init?(coder: NSCoder) {
-      fatalError("init(coder:) has not been implemented")
-    }
-  }
-#elseif canImport(AppKit)
-  struct PiPVideoPlayer: NSViewRepresentable {
-    let player: AVPlayer
-    var isAspectFill: Bool = false
-
-    func makeNSView(context: Context) -> PlayerNSView {
-      let view = PlayerNSView()
-      if let playerLayer = view.playerLayer {
-        playerLayer.player = player
-        playerLayer.videoGravity = isAspectFill ? .resizeAspectFill : .resizeAspect
-        PiPManager.shared.setup(with: playerLayer)
-      }
-      return view
-    }
-
-    func updateNSView(_ nsView: PlayerNSView, context: Context) {
-      if let playerLayer = nsView.playerLayer {
-        if playerLayer.player !== player {
-          playerLayer.player = player
-          PiPManager.shared.setup(with: playerLayer)
-        }
-        playerLayer.videoGravity = isAspectFill ? .resizeAspectFill : .resizeAspect
-      }
-    }
-
-    static func dismantleNSView(_ nsView: PlayerNSView, coordinator: ()) {
-      nsView.playerLayer?.player = nil
-    }
+    uiView.playerLayer.videoGravity = isAspectFill ? .resizeAspectFill : .resizeAspect
   }
 
-  final class PlayerNSView: NSView {
-    override func makeBackingLayer() -> CALayer {
-      AVPlayerLayer()
-    }
-
-    var playerLayer: AVPlayerLayer? {
-      layer as? AVPlayerLayer
-    }
-
-    override init(frame frameRect: NSRect) {
-      super.init(frame: frameRect)
-      wantsLayer = true
-      layerContentsRedrawPolicy = .never
-    }
-
-    required init?(coder: NSCoder) {
-      fatalError("init(coder:) has not been implemented")
-    }
+  static func dismantleUIView(_ uiView: PlayerUIView, coordinator: ()) {
+    uiView.playerLayer.player = nil
   }
-#endif
+}
+
+final class PlayerUIView: UIView {
+  override static var layerClass: AnyClass {
+    AVPlayerLayer.self
+  }
+
+  var playerLayer: AVPlayerLayer {
+    layer as! AVPlayerLayer
+  }
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    backgroundColor = .black
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+}

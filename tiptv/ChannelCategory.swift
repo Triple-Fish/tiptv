@@ -4,6 +4,21 @@
 //
 
 import Foundation
+import os
+
+private final class ChannelClassificationCache: Sendable {
+  nonisolated private let categories = OSAllocatedUnfairLock(
+    initialState: [String: ChannelCategory]()
+  )
+
+  nonisolated func category(for group: String) -> ChannelCategory? {
+    categories.withLock { $0[group] }
+  }
+
+  nonisolated func setCategory(_ category: ChannelCategory, for group: String) {
+    categories.withLock { $0[group] = category }
+  }
+}
 
 enum ChannelCategory: String, CaseIterable, Identifiable, Sendable, Codable {
   case all = "All"
@@ -87,18 +102,15 @@ enum ChannelCategory: String, CaseIterable, Identifiable, Sendable, Codable {
     pattern: #"\\b[sS]\d{1,2}\s*[eE]\d{1,2}\b|\bseason\s*\d+\b"#)
 
   // Memoized cache for playlist group classifications (typically 30-100 unique groups across 50,000 channels)
-  nonisolated(unsafe) private static let groupClassificationCache = NSCache<NSString, NSString>()
+  nonisolated private static let groupClassificationCache = ChannelClassificationCache()
 
   /// Intelligently classifies any channel into a high level content category
   /// based on its playlist group and channel title with ultra-fast group memoization.
   nonisolated static func classify(group: String?, name: String) -> ChannelCategory {
     // 1. Check if group alone uniquely identifies the category (95%+ of IPTV channels)
     if let group, !group.isEmpty {
-      let nsGroup = group as NSString
-      if let cached = groupClassificationCache.object(forKey: nsGroup) {
-        if let cat = ChannelCategory(rawValue: cached as String) {
-          return cat
-        }
+      if let cached = groupClassificationCache.category(for: group) {
+        return cached
       }
 
       let gLower = group.lowercased()
@@ -115,7 +127,7 @@ enum ChannelCategory: String, CaseIterable, Identifiable, Sendable, Codable {
       }()
 
       if let matched = matchedCategory {
-        groupClassificationCache.setObject(matched.rawValue as NSString, forKey: nsGroup)
+        groupClassificationCache.setCategory(matched, for: group)
         return matched
       }
     }

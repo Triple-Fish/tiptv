@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import OSLog
 
 /// Provides ultra-fast local disk caching of parsed channels and VOD catalogs.
 /// Enables sub-100ms instant app launch without waiting for network re-downloads.
@@ -70,7 +71,8 @@ actor PlaylistCacheManager {
       try data.write(to: fileURL, options: .atomic)
     } catch {
       #if DEBUG
-        print("[PlaylistCacheManager] Failed to cache channels: \(error)")
+        AppLog.persistence.error(
+          "Failed to cache channels: \(error.localizedDescription, privacy: .public)")
       #endif
     }
   }
@@ -85,7 +87,8 @@ actor PlaylistCacheManager {
       try data.write(to: fileURL, options: .atomic)
     } catch {
       #if DEBUG
-        print("[PlaylistCacheManager] Failed to cache movies: \(error)")
+        AppLog.persistence.error(
+          "Failed to cache movies: \(error.localizedDescription, privacy: .public)")
       #endif
     }
   }
@@ -100,7 +103,8 @@ actor PlaylistCacheManager {
       try data.write(to: fileURL, options: .atomic)
     } catch {
       #if DEBUG
-        print("[PlaylistCacheManager] Failed to cache series: \(error)")
+        AppLog.persistence.error(
+          "Failed to cache series: \(error.localizedDescription, privacy: .public)")
       #endif
     }
   }

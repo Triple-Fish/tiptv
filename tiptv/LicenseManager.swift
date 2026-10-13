@@ -5,6 +5,7 @@
 
 import Combine
 import Foundation
+import OSLog
 import StoreKit
 import SwiftUI
 
@@ -97,7 +98,8 @@ final class LicenseManager: ObservableObject {
         self.lifetimeProduct = first
       }
     } catch {
-      print("Failed to fetch StoreKit products: \(error)")
+      AppLog.purchases.error(
+        "Failed to fetch StoreKit products: \(error.localizedDescription, privacy: .public)")
     }
   }
 

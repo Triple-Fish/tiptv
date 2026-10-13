@@ -40,6 +40,12 @@ final class PlaylistCredentials {
     persistGlobalCredentials()
   }
 
+  func flushPendingChanges() {
+    persistenceTask?.cancel()
+    persistenceTask = nil
+    persistGlobalCredentials()
+  }
+
   func savePassword(for profileID: UUID) {
     persistenceTask?.cancel()
     persistenceTask = nil

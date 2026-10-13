@@ -155,6 +155,49 @@ struct PlaylistAndCatalogTests {
     #expect(expired == nil)
   }
 
+  @Test @MainActor func `Profile passwords round trip through secure storage`() {
+    let credentials = PlaylistCredentials.shared
+    let profileID = UUID()
+    let originalUsername = credentials.username
+    let originalPassword = credentials.password
+    defer {
+      credentials.deletePassword(for: profileID)
+      credentials.username = originalUsername
+      credentials.password = originalPassword
+      credentials.flushPendingChanges()
+    }
+
+    credentials.password = "test-password-\(profileID.uuidString)"
+    credentials.savePassword(for: profileID)
+    credentials.password = ""
+    credentials.loadPassword(for: profileID)
+
+    #expect(credentials.password == "test-password-\(profileID.uuidString)")
+  }
+
+  @Test func `Playback recovery escalates without looping`() {
+    #expect(
+      PlaybackRecoveryPolicy.action(
+        forAttempt: 1, isPlaying: true, isVOD: false, backupPlayerAllowed: true
+      ) == .recovered)
+    #expect(
+      PlaybackRecoveryPolicy.action(
+        forAttempt: 1, isPlaying: false, isVOD: false, backupPlayerAllowed: true
+      ) == .reloadNative)
+    #expect(
+      PlaybackRecoveryPolicy.action(
+        forAttempt: 1, isPlaying: false, isVOD: true, backupPlayerAllowed: true
+      ) == .showError)
+    #expect(
+      PlaybackRecoveryPolicy.action(
+        forAttempt: 2, isPlaying: false, isVOD: false, backupPlayerAllowed: true
+      ) == .switchToBackup)
+    #expect(
+      PlaybackRecoveryPolicy.action(
+        forAttempt: 2, isPlaying: false, isVOD: false, backupPlayerAllowed: false
+      ) == .showError)
+  }
+
   private func makeChannel(name: String, url: String, category: ChannelCategory) throws -> Channel {
     let streamURL = try #require(URL(string: url))
     return Channel(name: name, streamURL: streamURL, category: category)
