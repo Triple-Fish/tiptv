@@ -256,6 +256,10 @@ struct MoviesCatalogView: View {
             featuredHeroCard(item: item)
           }
 
+          if searchText.isEmpty, selectedGroup == "All" {
+            continueWatchingShelf
+          }
+
           // Poster Grid (2:3 aspect ratio cards)
           VStack(alignment: .leading, spacing: 14) {
             Text(selectedGroup == "All" ? "All \(title)" : selectedGroup)
@@ -416,6 +420,91 @@ struct MoviesCatalogView: View {
         category: .movies
       )
       onSelectChannel(movieItem)
+    }
+  }
+
+  // MARK: - Continue Watching Shelf
+
+  @ViewBuilder
+  private var continueWatchingShelf: some View {
+    let relevant = continueWatching.entries.filter { entry in
+      title == "Movies"
+        ? (entry.channel.isMovie || entry.channel.category == .movies)
+        : (entry.channel.isSeries || entry.channel.category == .series)
+    }
+    if !relevant.isEmpty {
+      VStack(alignment: .leading, spacing: 10) {
+        HStack(spacing: 6) {
+          Image(systemName: "play.circle.fill")
+            .font(.caption)
+            .foregroundStyle(themeManager.accent)
+          Text("Continue Watching")
+            .font(.system(size: 16, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+          Spacer()
+        }
+        .padding(.horizontal, 20)
+
+        ScrollView(.horizontal, showsIndicators: false) {
+          LazyHStack(spacing: 12) {
+            ForEach(relevant) { entry in
+              Button {
+                handleItemSelection(entry.channel)
+              } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                  ZStack(alignment: .bottom) {
+                    ZStack(alignment: .center) {
+                      RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.06))
+                      MovieArtworkView(
+                        logoURL: entry.channel.logoURL,
+                        title: entry.channel.uniformName,
+                        isSeries: title == "Series"
+                      )
+                    }
+                    .frame(width: 105, height: 145)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    GeometryReader { geo in
+                      ZStack(alignment: .leading) {
+                        Rectangle()
+                          .fill(Color.black.opacity(0.6))
+                          .frame(height: 4)
+                        Rectangle()
+                          .fill(themeManager.accent)
+                          .frame(width: geo.size.width * CGFloat(entry.progress), height: 4)
+                      }
+                    }
+                    .frame(height: 4)
+                  }
+                  .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                      .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
+                  )
+
+                  Text(entry.channel.uniformName)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+                    .frame(width: 105, alignment: .leading)
+                }
+              }
+              .buttonStyle(.plain)
+              .contextMenu {
+                Button(role: .destructive) {
+                  withAnimation {
+                    continueWatching.remove(entry.channel)
+                  }
+                } label: {
+                  Label("Remove from Continue Watching", systemImage: "trash")
+                }
+              }
+            }
+          }
+          .padding(.horizontal, 20)
+        }
+      }
+      .padding(.bottom, 6)
     }
   }
 

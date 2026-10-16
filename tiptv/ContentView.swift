@@ -31,13 +31,11 @@ enum AppTab: String, CaseIterable, Identifiable {
 }
 
 enum ActiveSheet: Identifiable {
-  case settings
   case playlistImport
 
   var id: Int {
     switch self {
-    case .settings: return 1
-    case .playlistImport: return 2
+    case .playlistImport: return 1
     }
   }
 }
@@ -314,44 +312,6 @@ struct ContentView: View {
     }
     .sheet(item: $activeSheet) { sheet in
       switch sheet {
-      case .settings:
-        NavigationStack {
-          SettingsView(
-            playlistURL: $playlistURL,
-            username: $credentials.username,
-            epgURL: $epgURL,
-            totalChannels: visibleChannels.count,
-            allChannels: channels,
-            onReload: {
-              Task {
-                await loadPlaylist()
-              }
-            },
-            onDelete: {
-              deletePlaylist()
-              activeSheet = nil
-            },
-            onOpenImporter: {
-              activeSheet = .playlistImport
-            },
-            onSelectProfile: selectProfile
-          )
-          .inlineNavigationBarTitle()
-          .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-              Button("Done") {
-                activeSheet = nil
-              }
-              .font(.system(size: 15, weight: .semibold, design: .rounded))
-              .foregroundStyle(TipTVTheme.aqua)
-            }
-          }
-        }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .tint(themeManager.accent)
-        .preferredColorScheme(.dark)
-
       case .playlistImport:
         PlaylistImportView(
           playlistURL: $playlistURL,
@@ -530,6 +490,7 @@ struct ContentView: View {
       isPresentingPaywall = true
       return
     }
+    SeriesPlaybackManager.shared.preparePlayback(of: channel, availableChannels: channels)
     selectedChannelID = channel.id
     RecentChannelsManager.shared.recordChannel(channel)
 

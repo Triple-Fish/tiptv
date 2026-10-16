@@ -198,6 +198,125 @@ struct PlaylistAndCatalogTests {
       ) == .showError)
   }
 
+  @Test func `Parser handles unencoded spaces in stream URLs`() throws {
+    let playlist = """
+      #EXTM3U
+      #EXTINF:-1 group-title="Movies",The Space Movie (2025)
+      https://example.com/movie/The Space Movie.mp4
+      """
+
+    let channels = PlaylistParser.channels(from: playlist)
+    #expect(channels.count == 1)
+    #expect(channels.first?.name == "The Space Movie (2025)")
+    #expect(channels.first?.isMovie == true)
+  }
+
+  @Test @MainActor func `Continue watching records position and clears on completion`() throws {
+    let manager = ContinueWatchingManager.shared
+    let channel = try makeChannel(
+      name: "Feature Film",
+      url: "https://example.com/movie/film.mp4",
+      category: .movies
+    )
+
+    // Record 500s into 1000s movie (50% progress)
+    manager.record(channel: channel, position: 500, duration: 1000, force: true)
+    #expect(manager.position(for: channel) == 500)
+
+    // Record 960s into 1000s movie (96% progress - triggers auto-completion removal)
+    manager.record(channel: channel, position: 960, duration: 1000, force: true)
+    #expect(manager.position(for: channel) == nil)
+  }
+
+  @Test @MainActor func `Continue watching ignores finite live streams`() throws {
+    let manager = ContinueWatchingManager.shared
+    let channel = try makeChannel(
+      name: "Live Channel",
+      url: "https://example.com/live/channel.m3u8",
+      category: .entertainment
+    )
+
+    manager.remove(channel)
+    manager.record(channel: channel, position: 500, duration: 3_600, force: true)
+    #expect(manager.position(for: channel) == nil)
+  }
+
+  @Test @MainActor func `Series playback manager manages episode queue progression`() throws {
+    let ep1 = try makeChannel(
+      name: "S01E01 Pilot",
+      url: "https://example.com/series/s01e01.mp4",
+      category: .series
+    )
+    let ep2 = try makeChannel(
+      name: "S01E02 Second",
+      url: "https://example.com/series/s01e02.mp4",
+      category: .series
+    )
+
+    let manager = SeriesPlaybackManager.shared
+    manager.configureM3UQueue(groupChannels: [ep1, ep2], currentChannel: ep1)
+
+    #expect(manager.isSeriesActive)
+    #expect(manager.hasNextEpisode)
+    #expect(!manager.hasPreviousEpisode)
+
+    let next = manager.advanceToNextEpisode()
+    #expect(next?.id == ep2.id)
+    #expect(manager.hasPreviousEpisode)
+    #expect(!manager.hasNextEpisode)
+
+    let prev = manager.goToPreviousEpisode()
+    #expect(prev?.id == ep1.id)
+
+    manager.clearQueue()
+    #expect(!manager.isSeriesActive)
+  }
+
+  @Test @MainActor func `Series playback follows M3U episodes and clears for unrelated content`() throws {
+    let ep1 = try makeChannel(
+      name: "Example Show S01E01 Pilot",
+      url: "https://example.com/series/example-s01e01.mp4",
+      category: .series
+    )
+    let ep2 = try makeChannel(
+      name: "Example Show S01E02 Second",
+      url: "https://example.com/series/example-s01e02.mp4",
+      category: .series
+    )
+    let movie = try makeChannel(
+      name: "Feature Film",
+      url: "https://example.com/movie/feature.mp4",
+      category: .movies
+    )
+
+    let manager = SeriesPlaybackManager.shared
+    manager.preparePlayback(of: ep1, availableChannels: [ep1, ep2, movie])
+    #expect(manager.hasNextEpisode)
+    #expect(manager.advanceToNextEpisode()?.id == ep2.id)
+
+    manager.preparePlayback(of: movie, availableChannels: [ep1, ep2, movie])
+    #expect(!manager.isSeriesActive)
+  }
+
+  @Test @MainActor func `Recent channels manager records and filters channels in order`() throws {
+    let manager = RecentChannelsManager.shared
+    manager.clearRecent()
+
+    let ch1 = try makeChannel(name: "BBC One", url: "https://example.com/bbc1.m3u8", category: .entertainment)
+    let ch2 = try makeChannel(name: "Sky Sports", url: "https://example.com/skysports.m3u8", category: .sports)
+
+    manager.recordChannel(ch1)
+    manager.recordChannel(ch2)
+
+    let filtered = manager.filterRecent(from: [ch1, ch2])
+    #expect(filtered.count == 2)
+    #expect(filtered.first?.id == ch2.id)
+    #expect(filtered.last?.id == ch1.id)
+
+    manager.clearRecent()
+    #expect(manager.filterRecent(from: [ch1, ch2]).isEmpty)
+  }
+
   private func makeChannel(name: String, url: String, category: ChannelCategory) throws -> Channel {
     let streamURL = try #require(URL(string: url))
     return Channel(name: name, streamURL: streamURL, category: category)

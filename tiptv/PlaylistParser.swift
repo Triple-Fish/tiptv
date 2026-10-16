@@ -73,25 +73,30 @@ enum PlaylistParser {
           tvgID = attribute(named: "tvg-id", in: line)
           group = attribute(named: "group-title", in: line)
           logoURL = attribute(named: "tvg-logo", in: line).flatMap(URL.init(string:))
-        } else if !line.hasPrefix("#"), let streamURL = URL(string: line) {
-          let rawName = name.isEmpty ? (streamURL.host ?? "Untitled Channel") : name
-          let cleanedName = cleanSeparators(rawName)
-          let cleanedGroup = group.map(cleanSeparators)
-          let uniform = uniformChannelName(cleanedName)
-          let category = ChannelCategory.classify(group: cleanedGroup, name: cleanedName)
+        } else if !line.hasPrefix("#") {
+          let streamURL =
+            URL(string: line)
+            ?? URL(string: line.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+          if let streamURL {
+            let rawName = name.isEmpty ? (streamURL.host ?? "Untitled Channel") : name
+            let cleanedName = cleanSeparators(rawName)
+            let cleanedGroup = group.map(cleanSeparators)
+            let uniform = uniformChannelName(cleanedName)
+            let category = ChannelCategory.classify(group: cleanedGroup, name: cleanedName)
 
-          channels.append(
-            Channel(
-              name: cleanedName,
-              tvgID: tvgID,
-              uniformName: uniform,
-              group: cleanedGroup,
-              logoURL: logoURL,
-              streamURL: streamURL,
-              streamURLString: line,
-              category: category
+            channels.append(
+              Channel(
+                name: cleanedName,
+                tvgID: tvgID,
+                uniformName: uniform,
+                group: cleanedGroup,
+                logoURL: logoURL,
+                streamURL: streamURL,
+                streamURLString: line,
+                category: category
+              )
             )
-          )
+          }
           name = ""
           tvgID = nil
           group = nil
@@ -125,25 +130,30 @@ enum PlaylistParser {
         tvgID = attribute(named: "tvg-id", in: line)
         group = attribute(named: "group-title", in: line)
         logoURL = attribute(named: "tvg-logo", in: line).flatMap(URL.init(string:))
-      } else if !line.hasPrefix("#"), let streamURL = URL(string: line) {
-        let rawName = name.isEmpty ? (streamURL.host ?? "Untitled Channel") : name
-        let cleanedName = cleanSeparators(rawName)
-        let cleanedGroup = group.map(cleanSeparators)
-        let uniform = uniformChannelName(cleanedName)
-        let cat = ChannelCategory.classify(group: cleanedGroup, name: cleanedName)
+      } else if !line.hasPrefix("#") {
+        let streamURL =
+          URL(string: line)
+          ?? URL(string: line.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+        if let streamURL {
+          let rawName = name.isEmpty ? (streamURL.host ?? "Untitled Channel") : name
+          let cleanedName = cleanSeparators(rawName)
+          let cleanedGroup = group.map(cleanSeparators)
+          let uniform = uniformChannelName(cleanedName)
+          let cat = ChannelCategory.classify(group: cleanedGroup, name: cleanedName)
 
-        channels.append(
-          Channel(
-            name: cleanedName,
-            tvgID: tvgID,
-            uniformName: uniform,
-            group: cleanedGroup,
-            logoURL: logoURL,
-            streamURL: streamURL,
-            streamURLString: line,
-            category: cat
+          channels.append(
+            Channel(
+              name: cleanedName,
+              tvgID: tvgID,
+              uniformName: uniform,
+              group: cleanedGroup,
+              logoURL: logoURL,
+              streamURL: streamURL,
+              streamURLString: line,
+              category: cat
+            )
           )
-        )
+        }
         name = ""
         tvgID = nil
         group = nil

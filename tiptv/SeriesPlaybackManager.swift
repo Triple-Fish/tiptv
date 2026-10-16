@@ -136,6 +136,34 @@ final class SeriesPlaybackManager: ObservableObject {
     self.currentM3UIndex = groupChannels.firstIndex(where: { $0.id == currentChannel.id }) ?? 0
   }
 
+  /// Aligns the shared queue with the item being opened and clears stale series state
+  /// when playback moves to unrelated content.
+  func preparePlayback(of channel: Channel, availableChannels: [Channel]) {
+    cancelCountdown()
+
+    if !episodesQueue.isEmpty,
+      let index = episodesQueue.firstIndex(where: { $0.streamURL == channel.streamURL })
+    {
+      currentEpisodeIndex = index
+      return
+    }
+
+    guard channel.isSeries, let seriesKey = m3uSeriesKey(for: channel) else {
+      clearQueue()
+      return
+    }
+
+    let matchingEpisodes = availableChannels.filter {
+      $0.isSeries && m3uSeriesKey(for: $0) == seriesKey
+    }
+    guard matchingEpisodes.contains(where: { $0.id == channel.id }) else {
+      clearQueue()
+      return
+    }
+
+    configureM3UQueue(groupChannels: matchingEpisodes, currentChannel: channel)
+  }
+
   // MARK: - Navigation
 
   /// Advances to next episode and returns the Channel to play
@@ -201,6 +229,19 @@ final class SeriesPlaybackManager: ObservableObject {
     currentEpisodeIndex = -1
     m3uQueue = []
     currentM3UIndex = -1
+  }
+
+  private func m3uSeriesKey(for channel: Channel) -> String? {
+    let name = channel.uniformName.lowercased()
+    guard let episodeRange = name.range(
+      of: #"\bs\d{1,3}\s*e\d{1,3}\b"#,
+      options: .regularExpression
+    ) else { return nil }
+
+    let title = name[..<episodeRange.lowerBound]
+      .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "-–—:|._")))
+    guard !title.isEmpty else { return nil }
+    return title
   }
 
   // MARK: - Autoplay & Countdown

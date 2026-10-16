@@ -201,7 +201,10 @@ struct FavoritesCatalogView: View {
         baseURL: baseURL,
         username: username,
         password: password,
-        onPlayEpisode: onPlayEpisode,
+        onPlayEpisode: { ep in
+          selectedSeries = nil
+          onPlayEpisode(ep)
+        },
         onDismiss: { selectedSeries = nil }
       )
     }

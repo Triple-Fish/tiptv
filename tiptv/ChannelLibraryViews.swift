@@ -89,6 +89,7 @@ struct ChannelLibraryView: View {
   let deletePlaylist: () -> Void
 
   @State private var favoritesManager = FavoritesManager.shared
+  @State private var recentManager = RecentChannelsManager.shared
   @State private var isShowingDeleteConfirmation = false
   @State private var isShowingTimelineGuide = false
   @State private var displayLimit = 250
@@ -113,6 +114,13 @@ struct ChannelLibraryView: View {
       }
 
       List {
+        if searchText.isEmpty, selectedCategory == .all {
+          let recentChannels = recentManager.filterRecent(from: channels)
+          if !recentChannels.isEmpty {
+            recentChannelsCarousel(recentChannels: recentChannels)
+          }
+        }
+
         Section {
           if isLoading {
             ForEach(0..<6, id: \.self) { _ in
@@ -336,6 +344,55 @@ struct ChannelLibraryView: View {
         }
       }
       .preferredColorScheme(.dark)
+    }
+  }
+
+  @ViewBuilder
+  private func recentChannelsCarousel(recentChannels: [Channel]) -> some View {
+    Section {
+      ScrollView(.horizontal, showsIndicators: false) {
+        LazyHStack(spacing: 10) {
+          ForEach(recentChannels) { recent in
+            Button {
+              onSelectChannel(recent)
+            } label: {
+              HStack(spacing: 8) {
+                ChannelArtwork(
+                  logoURL: recent.logoURL,
+                  channelName: recent.uniformName,
+                  size: 24,
+                  cornerRadius: 5
+                )
+                Text(recent.uniformName)
+                  .font(.system(size: 13, weight: .semibold, design: .rounded))
+                  .foregroundStyle(.white)
+                  .lineLimit(1)
+              }
+              .padding(.horizontal, 10)
+              .padding(.vertical, 6)
+              .background(Color.white.opacity(0.08), in: Capsule())
+              .overlay(
+                Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+              )
+            }
+            .buttonStyle(.plain)
+          }
+        }
+        .padding(.vertical, 4)
+      }
+      .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+      .listRowBackground(Color.clear)
+      .listRowSeparator(.hidden)
+    } header: {
+      HStack(spacing: 6) {
+        Image(systemName: "clock.arrow.circlepath")
+          .font(.caption2)
+          .foregroundStyle(TipTVTheme.aqua)
+        Text("Recently Watched")
+          .font(.system(size: 12, weight: .bold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.7))
+          .textCase(nil)
+      }
     }
   }
 }

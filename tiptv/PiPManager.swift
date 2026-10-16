@@ -101,6 +101,13 @@ final class PiPManager: NSObject, ObservableObject, AVPictureInPictureController
     isPiPActive = false
     AppLog.playback.error("PiP failed to start: \(error.localizedDescription, privacy: .public)")
   }
+
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
+    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+  ) {
+    completionHandler(true)
+  }
 }
 
 // MARK: - iPhone PiP Video Player Representable
@@ -126,7 +133,9 @@ struct PiPVideoPlayer: UIViewRepresentable {
   }
 
   static func dismantleUIView(_ uiView: PlayerUIView, coordinator: ()) {
-    uiView.playerLayer.player = nil
+    if !PiPManager.shared.isPiPActive {
+      uiView.playerLayer.player = nil
+    }
   }
 }
 

@@ -320,4 +320,5 @@ enum TipTVTheme {
   static var artworkGradient: LinearGradient { current.artworkGradient }
   static var heroGradient: LinearGradient { current.heroGradient }
   static var contentBackground: LinearGradient { current.contentBackground }
+  static let legalEULAURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/") ?? URL(fileURLWithPath: "/")
 }

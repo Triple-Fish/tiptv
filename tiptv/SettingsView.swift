@@ -578,8 +578,7 @@ struct SettingsView: View {
   private var legalSection: some View {
     Section {
       Link(
-        destination: URL(
-          string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+        destination: TipTVTheme.legalEULAURL
       ) {
         HStack {
           Label("Terms of Use (EULA)", systemImage: "doc.text")

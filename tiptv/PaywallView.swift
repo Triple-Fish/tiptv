@@ -292,8 +292,7 @@ struct PaywallView: View {
           HStack(spacing: 16) {
             Link(
               "Terms of Use (EULA)",
-              destination: URL(
-                string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+              destination: TipTVTheme.legalEULAURL)
             Text("•")
               .foregroundStyle(.white.opacity(0.3))
             Button("Privacy Policy") {

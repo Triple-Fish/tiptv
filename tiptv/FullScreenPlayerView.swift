@@ -43,19 +43,23 @@ struct FullScreenPlayerView: View {
   // Audio / Subtitles & Sleep Timer
   @StateObject private var sleepTimerManager = SleepTimerManager()
   @State private var isAudioSubtitleSheetVisible = false
+  @ObservedObject private var seriesManager = SeriesPlaybackManager.shared
+  @State private var hasResumedPlayback = false
 
   private var isVODContent: Bool {
-    let path = channel.streamURL.path.lowercased()
-    let urlStr = channel.streamURL.absoluteString.lowercased()
-    let isFileExt =
-      path.hasSuffix(".mp4") || path.hasSuffix(".mkv") || path.hasSuffix(".avi")
-      || path.hasSuffix(".m4v")
-    let isVODPath = urlStr.contains("/movie/") || urlStr.contains("/series/")
-    let hasFiniteDuration =
-      (player?.currentItem?.duration.isValid == true
-        && player?.currentItem?.duration.isIndefinite == false
-        && (player?.currentItem?.duration.seconds ?? 0) > 0)
-    return isFileExt || isVODPath || hasFiniteDuration
+    channel.isVOD || channel.isMovie || channel.isSeries || {
+      let path = channel.streamURL.path.lowercased()
+      let urlStr = channel.streamURL.absoluteString.lowercased()
+      let isFileExt =
+        path.hasSuffix(".mp4") || path.hasSuffix(".mkv") || path.hasSuffix(".avi")
+        || path.hasSuffix(".m4v")
+      let isVODPath = urlStr.contains("/movie/") || urlStr.contains("/series/")
+      let hasFiniteDuration =
+        (player?.currentItem?.duration.isValid == true
+          && player?.currentItem?.duration.isIndefinite == false
+          && (player?.currentItem?.duration.seconds ?? 0) > 0)
+      return isFileExt || isVODPath || hasFiniteDuration
+    }()
   }
 
   @State private var currentIndex: Int = -1
@@ -128,9 +132,20 @@ struct FullScreenPlayerView: View {
               .transition(.move(edge: .bottom).combined(with: .opacity))
           }
         }
+
+        // Series Autoplay Countdown Overlay
+        if seriesManager.isCountdownActive {
+          VStack {
+            Spacer()
+            seriesAutoplayOverlay
+              .padding(.bottom, areControlsVisible ? 110 : 36)
+              .transition(.move(edge: .bottom).combined(with: .opacity))
+          }
+        }
       }
     }
     .onAppear {
+      hasResumedPlayback = false
       if isFFmpegActive {
         isPlaying = true
         isMuted = mkvCoordinator.isMuted
@@ -141,6 +156,20 @@ struct FullScreenPlayerView: View {
           }
           if totalTime.isFinite && totalTime > 0 {
             self.duration = totalTime
+            if !self.hasResumedPlayback {
+              self.hasResumedPlayback = true
+              if let resumePos = ContinueWatchingManager.shared.position(for: self.channel), resumePos > 0 {
+                self.mkvCoordinator.seek(time: resumePos)
+                self.currentTime = resumePos
+              }
+            }
+          }
+          if curTime.isFinite && totalTime.isFinite && totalTime > 0 {
+            ContinueWatchingManager.shared.record(
+              channel: self.channel,
+              position: curTime,
+              duration: totalTime
+            )
           }
         }
         mkvCoordinator.onStateChanged = { layer, state in
@@ -148,6 +177,9 @@ struct FullScreenPlayerView: View {
             self.isPlaying = false
           } else if state == .buffering || state == .bufferFinished || state == .readyToPlay {
             self.isPlaying = true
+          } else if state == .playedToTheEnd {
+            self.isPlaying = false
+            self.handlePlaybackEnded()
           }
         }
       } else {
@@ -161,6 +193,7 @@ struct FullScreenPlayerView: View {
       resetControlsTimer()
     }
     .onChange(of: channel.id) { _, _ in
+      hasResumedPlayback = false
       updateCurrentIndex()
       if isFFmpegActive {
         removeTimeObserver()
@@ -180,7 +213,19 @@ struct FullScreenPlayerView: View {
         player?.play()
       }
     }
+    .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
+      guard (notification.object as? AVPlayerItem) === player?.currentItem else { return }
+      handlePlaybackEnded()
+    }
     .onDisappear {
+      if isVODContent && currentTime > 0 && duration > 0 {
+        ContinueWatchingManager.shared.record(
+          channel: channel,
+          position: currentTime,
+          duration: duration,
+          force: true
+        )
+      }
       if isFFmpegActive {
         mkvCoordinator.playerLayer?.pause()
         mkvCoordinator.resetPlayer()
@@ -410,7 +455,30 @@ struct FullScreenPlayerView: View {
   }
 
   private var centerControls: some View {
-    HStack(spacing: 30) {
+    HStack(spacing: 24) {
+      if seriesManager.isSeriesActive {
+        Button {
+          if let prev = seriesManager.goToPreviousEpisode() {
+            onSelectChannel(prev)
+            resetControlsTimer()
+          }
+        } label: {
+          Image(systemName: "backward.end.fill")
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(seriesManager.hasPreviousEpisode ? .white.opacity(0.85) : .white.opacity(0.25))
+            .frame(width: 44, height: 44)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(
+              Circle().strokeBorder(
+                Color.white.opacity(seriesManager.hasPreviousEpisode ? 0.18 : 0.06),
+                lineWidth: 0.5
+              )
+            )
+        }
+        .disabled(!seriesManager.hasPreviousEpisode)
+        .accessibilityLabel("Previous Episode")
+      }
+
       if isVODContent {
         // Infuse 10s Skip Backward
         Button {
@@ -488,7 +556,88 @@ struct FullScreenPlayerView: View {
         .disabled(!hasNext)
         .accessibilityLabel("Next Channel")
       }
+
+      if seriesManager.isSeriesActive {
+        Button {
+          if let next = seriesManager.advanceToNextEpisode() {
+            onSelectChannel(next)
+            resetControlsTimer()
+          }
+        } label: {
+          Image(systemName: "forward.end.fill")
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(seriesManager.hasNextEpisode ? .white.opacity(0.85) : .white.opacity(0.25))
+            .frame(width: 44, height: 44)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(
+              Circle().strokeBorder(
+                Color.white.opacity(seriesManager.hasNextEpisode ? 0.18 : 0.06),
+                lineWidth: 0.5
+              )
+            )
+        }
+        .disabled(!seriesManager.hasNextEpisode)
+        .accessibilityLabel("Next Episode")
+      }
     }
+  }
+
+  @ViewBuilder
+  private var seriesAutoplayOverlay: some View {
+    HStack(spacing: 14) {
+      VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 6) {
+          Image(systemName: "forward.end.fill")
+            .font(.caption2)
+            .foregroundStyle(themeManager.accent)
+          Text("Up Next in \(seriesManager.countdownSecondsRemaining)s")
+            .font(.system(.subheadline, design: .rounded).weight(.bold))
+            .foregroundStyle(.white)
+        }
+        Text(seriesManager.nextEpisodeTitle)
+          .font(.system(.caption, design: .rounded))
+          .foregroundStyle(.white.opacity(0.75))
+          .lineLimit(1)
+      }
+
+      Spacer()
+
+      Button {
+        seriesManager.cancelCountdown()
+      } label: {
+        Text("Cancel")
+          .font(.system(.caption, design: .rounded).weight(.semibold))
+          .foregroundStyle(.white.opacity(0.85))
+          .padding(.horizontal, 12)
+          .padding(.vertical, 7)
+          .background(Color.white.opacity(0.12), in: Capsule())
+      }
+
+      Button {
+        seriesManager.playNextNow { nextChannel in
+          onSelectChannel(nextChannel)
+        }
+      } label: {
+        HStack(spacing: 4) {
+          Image(systemName: "play.fill")
+            .font(.system(size: 10, weight: .bold))
+          Text("Play Now")
+            .font(.system(.caption, design: .rounded).weight(.bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(themeManager.currentTheme.artworkGradient, in: Capsule())
+        .shadow(color: themeManager.accent.opacity(0.4), radius: 8, y: 2)
+      }
+    }
+    .padding(14)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 18, style: .continuous)
+        .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5)
+    )
+    .padding(.horizontal, 20)
   }
 
   private var vodScrubberBar: some View {
@@ -756,17 +905,42 @@ struct FullScreenPlayerView: View {
     let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
     timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) {
       [weak player] time in
-      guard let player else { return }
-      if !self.isScrubbing {
-        self.currentTime = time.seconds.isFinite ? max(0, time.seconds) : 0
-      }
-      if let itemDuration = player.currentItem?.duration,
-        itemDuration.isValid && !itemDuration.isIndefinite
-      {
-        let sec = itemDuration.seconds
-        if sec.isFinite && sec > 0 {
-          self.duration = sec
+      MainActor.assumeIsolated {
+        guard let player else { return }
+        if !self.isScrubbing {
+          self.currentTime = time.seconds.isFinite ? max(0, time.seconds) : 0
         }
+        if let itemDuration = player.currentItem?.duration,
+          itemDuration.isValid && !itemDuration.isIndefinite
+        {
+          let sec = itemDuration.seconds
+          if sec.isFinite && sec > 0 {
+            self.duration = sec
+            if !self.hasResumedPlayback {
+              self.hasResumedPlayback = true
+              if let resumePos = ContinueWatchingManager.shared.position(for: self.channel), resumePos > 0 {
+                self.seek(to: resumePos)
+                self.currentTime = resumePos
+              }
+            }
+            if time.seconds.isFinite && time.seconds > 0 {
+              ContinueWatchingManager.shared.record(
+                channel: self.channel,
+                position: time.seconds,
+                duration: sec
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func handlePlaybackEnded() {
+    isPlaying = false
+    if seriesManager.isSeriesActive && seriesManager.hasNextEpisode {
+      seriesManager.handleEpisodePlaybackEnded { nextChannel in
+        onSelectChannel(nextChannel)
       }
     }
   }
