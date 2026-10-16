@@ -232,7 +232,7 @@ struct ChannelLibraryView: View {
           ChannelSectionHeader(
             displayedCount: channels.count,
             totalCount: totalChannelCount,
-            isFiltered: selectedCategory != .all,
+            isFiltered: !searchText.isEmpty || selectedCategory != .all,
             categoryTitle: selectedCategory.rawValue
           )
           .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))

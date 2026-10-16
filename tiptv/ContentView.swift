@@ -15,7 +15,7 @@ enum AppTab: String, CaseIterable, Identifiable {
   case movies = "Movies"
   case series = "Series"
   case favorites = "Favourites"
-  case more = "Settings"
+  case settings = "Settings"
 
   var id: String { rawValue }
 
@@ -25,7 +25,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case .movies: return "film"
     case .series: return "tv.inset.filled"
     case .favorites: return "heart.fill"
-    case .more: return "gearshape.fill"
+    case .settings: return "gearshape.fill"
     }
   }
 }
@@ -504,7 +504,7 @@ struct ContentView: View {
       }
       .padding(.bottom, 68)
 
-    case .more:
+    case .settings:
       SettingsView(
         playlistURL: $playlistURL,
         username: $credentials.username,

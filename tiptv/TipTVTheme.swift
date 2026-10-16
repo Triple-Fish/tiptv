@@ -321,37 +321,3 @@ enum TipTVTheme {
   static var heroGradient: LinearGradient { current.heroGradient }
   static var contentBackground: LinearGradient { current.contentBackground }
 }
-
-struct TipTVBrandLogo: View {
-  var size: CGFloat = 26
-  @ObservedObject private var themeManager = ThemeManager.shared
-
-  var body: some View {
-    HStack(spacing: 0) {
-      Text("T")
-        .font(.system(size: size, weight: .bold, design: .rounded))
-        .foregroundStyle(.white)
-
-      ZStack(alignment: .top) {
-        Text("ı")  // dotless i
-          .font(.system(size: size, weight: .bold, design: .rounded))
-          .foregroundStyle(.white)
-
-        Circle()
-          .fill(themeManager.accent)
-          .frame(width: size * 0.34, height: size * 0.34)
-          .overlay {
-            Image(systemName: "play.fill")
-              .font(.system(size: size * 0.16, weight: .black))
-              .foregroundStyle(.white)
-              .offset(x: 0.5)
-          }
-          .offset(y: size * 0.02)
-      }
-
-      Text("ptv")
-        .font(.system(size: size, weight: .bold, design: .rounded))
-        .foregroundStyle(.white)
-    }
-  }
-}
