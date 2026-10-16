@@ -13,6 +13,16 @@ struct SettingsView: View {
     case account = "Account"
     case about = "About"
     var id: String { rawValue }
+
+    var icon: String {
+      switch self {
+      case .playlist: return "list.bullet.rectangle"
+      case .playback: return "play.rectangle.fill"
+      case .appearance: return "paintbrush.fill"
+      case .account: return "person.crop.circle.fill"
+      case .about: return "info.circle.fill"
+      }
+    }
   }
   @Binding var playlistURL: String
   @Binding var username: String
@@ -45,14 +55,7 @@ struct SettingsView: View {
     NavigationStack {
       List {
         headerSection
-        Section {
-          Picker("Settings category", selection: $selectedSettingsCategory) {
-            ForEach(SettingsCategory.allCases) { category in
-              Text(category.rawValue).tag(category)
-            }
-          }
-          .pickerStyle(.menu)
-        }
+        categorySelector
         switch selectedSettingsCategory {
         case .playlist:
           playlistSection
@@ -72,7 +75,7 @@ struct SettingsView: View {
       }
       .scrollContentBackground(.hidden)
       .background(TipTVTheme.contentBackground.ignoresSafeArea())
-      .navigationTitle("More")
+      .navigationTitle("Settings")
       .confirmationDialog(
         "Delete Playlist?",
         isPresented: $showingDeleteConfirmation,
@@ -115,6 +118,46 @@ struct SettingsView: View {
   }
 
   // MARK: - Sections
+
+  private var categorySelector: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      LazyHStack(spacing: 8) {
+        ForEach(SettingsCategory.allCases) { category in
+          let isSelected = selectedSettingsCategory == category
+          Button {
+            Haptics.selection()
+            withAnimation(.easeInOut(duration: 0.2)) {
+              selectedSettingsCategory = category
+            }
+          } label: {
+            Label(category.rawValue, systemImage: category.icon)
+              .font(.system(size: 12, weight: isSelected ? .bold : .semibold, design: .rounded))
+              .foregroundStyle(isSelected ? .black : .white.opacity(0.82))
+              .padding(.horizontal, 13)
+              .padding(.vertical, 8)
+              .background(
+                isSelected ? themeManager.accent : TipTVTheme.cardBackground,
+                in: Capsule()
+              )
+              .overlay {
+                Capsule()
+                  .strokeBorder(
+                    isSelected ? themeManager.accent.opacity(0.8) : TipTVTheme.cardBorder,
+                    lineWidth: 0.75
+                  )
+              }
+          }
+          .buttonStyle(.plain)
+          .accessibilityAddTraits(isSelected ? .isSelected : [])
+        }
+      }
+      .padding(.horizontal, 4)
+      .padding(.vertical, 4)
+    }
+    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+    .listRowBackground(Color.clear)
+    .listRowSeparator(.hidden)
+  }
 
   @ViewBuilder
   private var headerSection: some View {

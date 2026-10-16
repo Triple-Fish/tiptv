@@ -15,8 +15,7 @@ enum AppTab: String, CaseIterable, Identifiable {
   case movies = "Movies"
   case series = "Series"
   case favorites = "Favourites"
-  case search = "Search"
-  case more = "More"
+  case more = "Settings"
 
   var id: String { rawValue }
 
@@ -26,8 +25,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case .movies: return "film"
     case .series: return "tv.inset.filled"
     case .favorites: return "heart.fill"
-    case .search: return "magnifyingglass"
-    case .more: return "ellipsis"
+    case .more: return "gearshape.fill"
     }
   }
 }
@@ -80,6 +78,10 @@ struct ContentView: View {
   @State private var playbackRecoveryTask: Task<Void, Never>? = nil
   @State private var playbackRecoveryAttempts = 0
   @State private var selectedTab: AppTab = .tvGuide
+  @State private var searchText = ""
+  @State private var movieSearchText = ""
+  @State private var seriesSearchText = ""
+  @State private var favoritesSearchText = ""
   @State private var selectedCategory: ChannelCategory = .all
   @State private var activeSheet: ActiveSheet?
   @State private var isLoadingPlaylist = false
@@ -90,6 +92,7 @@ struct ContentView: View {
   @State private var categoryCounts: [ChannelCategory: Int] = [:]
   @State private var availableCategories: [ChannelCategory] = [.all]
   @State private var filteredChannels: [Channel] = []
+  @State private var searchDebounceTask: Task<Void, Never>?
   @State private var catalogRefreshTask: Task<Void, Never>?
   @State private var channelFilterTask: Task<Void, Never>?
   @State private var epgLoadTask: Task<Void, Never>?
@@ -101,6 +104,7 @@ struct ContentView: View {
     let hiddenURLs = hiddenChannelsManager.hiddenStreamURLs
     let favoriteURLs = favoritesManager.favoriteStreamURLs
     let category = selectedCategory
+    let query = searchText
 
     catalogRefreshTask = Task {
       let work = Task.detached(priority: .userInitiated) {
@@ -135,7 +139,7 @@ struct ContentView: View {
           in: visible,
           category: category,
           favoriteStreamURLs: favoriteURLs,
-          query: ""
+          query: query
         )
         return ChannelCatalogSnapshot(
           visibleChannels: visible,
@@ -163,13 +167,14 @@ struct ContentView: View {
     let currentChannels = visibleChannels
     let category = selectedCategory
     let favoriteURLs = favoritesManager.favoriteStreamURLs
+    let query = searchText
     channelFilterTask = Task {
       let work = Task.detached(priority: .userInitiated) {
         ChannelCatalog.filteredChannels(
           in: currentChannels,
           category: category,
           favoriteStreamURLs: favoriteURLs,
-          query: ""
+          query: query
         )
       }
       let filtered = await withTaskCancellationHandler {
@@ -179,6 +184,15 @@ struct ContentView: View {
       }
       guard !Task.isCancelled else { return }
       filteredChannels = filtered
+    }
+  }
+
+  private func queueSearchFilter() {
+    searchDebounceTask?.cancel()
+    searchDebounceTask = Task {
+      try? await Task.sleep(for: .milliseconds(120))
+      guard !Task.isCancelled else { return }
+      updateFilteredChannels()
     }
   }
 
@@ -379,6 +393,9 @@ struct ContentView: View {
     .onChange(of: selectedCategory) { _, _ in
       updateFilteredChannels()
     }
+    .onChange(of: searchText) { _, _ in
+      queueSearchFilter()
+    }
     .onChange(of: favoritesManager.favoriteStreamURLs) { _, _ in
       updateVisibleChannels()
     }
@@ -387,6 +404,7 @@ struct ContentView: View {
     }
     .onDisappear {
       catalogRefreshTask?.cancel()
+      searchDebounceTask?.cancel()
       channelFilterTask?.cancel()
       epgLoadTask?.cancel()
       resetPlaybackRecovery()
@@ -405,6 +423,7 @@ struct ContentView: View {
           categoryCounts: categoryCounts,
           selectedCategory: $selectedCategory,
           selectedChannelID: $selectedChannelID,
+          searchText: $searchText,
           isLoading: isLoadingPlaylist,
           onSelectChannel: selectChannel,
           openPlaylistImporter: { activeSheet = .playlistImport },
@@ -424,6 +443,7 @@ struct ContentView: View {
           items: movies,
           title: "Movies",
           isLoading: isLoadingVOD,
+          searchText: $movieSearchText,
           onSelectChannel: { channel in
             let movieItem = Channel(
               id: channel.id,
@@ -452,6 +472,7 @@ struct ContentView: View {
           items: series,
           title: "Series",
           isLoading: isLoadingVOD,
+          searchText: $seriesSearchText,
           onSelectChannel: selectChannel,
           onReload: {
             Task {
@@ -471,6 +492,7 @@ struct ContentView: View {
           baseURL: playlistURL,
           username: credentials.username,
           password: credentials.password,
+          searchText: $favoritesSearchText,
           onSelectChannel: selectChannel,
           onSelectMovie: { movieItem in
             selectChannel(movieItem)
@@ -480,15 +502,6 @@ struct ContentView: View {
           }
         )
       }
-      .padding(.bottom, 68)
-
-    case .search:
-      UnifiedSearchView(
-        channels: visibleChannels,
-        movies: movies,
-        series: series,
-        onSelect: selectChannel
-      )
       .padding(.bottom, 68)
 
     case .more:
@@ -1248,6 +1261,10 @@ struct ContentView: View {
     selectedChannelID = nil
     activeDetailChannel = nil
     selectedCategory = .all
+    searchText = ""
+    movieSearchText = ""
+    seriesSearchText = ""
+    favoritesSearchText = ""
     playlistMessage = nil
     Task {
       await PlaylistCacheManager.shared.clear(for: deletedCacheKey)

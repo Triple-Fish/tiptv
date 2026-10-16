@@ -8,6 +8,33 @@ struct BottomTabBar: View {
   @Namespace private var selectionNamespace
 
   var body: some View {
+    if #available(iOS 26.0, *) {
+      tabButtons
+        .padding(6)
+        .glassEffect(.regular, in: Capsule())
+        .overlay {
+          Capsule()
+            .strokeBorder(.white.opacity(0.2), lineWidth: 0.75)
+        }
+        .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
+    } else {
+      tabButtons
+        .padding(6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .background(Color.black.opacity(0.42), in: Capsule())
+        .overlay {
+          Capsule()
+            .strokeBorder(.white.opacity(0.2), lineWidth: 0.75)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 20, y: 10)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
+    }
+  }
+
+  private var tabButtons: some View {
     HStack(spacing: 4) {
       ForEach(AppTab.allCases) { tab in
         let isSelected = tab == selectedTab
@@ -28,11 +55,11 @@ struct BottomTabBar: View {
           .padding(.vertical, 9)
           .background {
             if isSelected {
-              RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(TipTVTheme.accent.opacity(0.2))
+              Capsule()
+                .fill(TipTVTheme.accent.opacity(0.24))
                 .overlay {
-                  RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(TipTVTheme.accent.opacity(0.42), lineWidth: 0.75)
+                  Capsule()
+                    .strokeBorder(TipTVTheme.accent.opacity(0.52), lineWidth: 0.75)
                 }
                 .matchedGeometryEffect(id: "selectedTab", in: selectionNamespace)
             }
@@ -41,22 +68,6 @@ struct BottomTabBar: View {
         .buttonStyle(.plain)
       }
     }
-    .padding(5)
-    .background(
-      ZStack {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
-          .fill(.ultraThinMaterial)
-        Color.black.opacity(0.7)
-          .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-      }
-      .overlay {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
-          .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75)
-      }
-      .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-    )
-    .padding(.horizontal, 12)
-    .padding(.bottom, 8)
     .animation(.spring(response: 0.32, dampingFraction: 0.82), value: selectedTab)
   }
 }
@@ -70,6 +81,7 @@ struct ChannelLibraryView: View {
   let categoryCounts: [ChannelCategory: Int]
   @Binding var selectedCategory: ChannelCategory
   @Binding var selectedChannelID: Channel.ID?
+  @Binding var searchText: String
   let isLoading: Bool
   let onSelectChannel: (Channel) -> Void
   let openPlaylistImporter: () -> Void
@@ -90,11 +102,6 @@ struct ChannelLibraryView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      ChannelLibraryDashboard(totalChannelCount: totalChannelCount)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
-
       // Floating Netflix-Style Category Filter Pills
       if categories.count > 1 {
         CategoryPillsBar(
@@ -115,7 +122,12 @@ struct ChannelLibraryView: View {
                 .listRowSeparator(.hidden)
             }
           } else if channels.isEmpty {
-            if selectedCategory == .favorites {
+            if !searchText.isEmpty {
+              ContentUnavailableView.search(text: searchText)
+                .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 24, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else if selectedCategory == .favorites {
               NoFavoritesCard(browseAllChannels: { selectedCategory = .all })
                 .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 24, trailing: 16))
                 .listRowBackground(Color.clear)
@@ -231,7 +243,15 @@ struct ChannelLibraryView: View {
     }
     .background(TipTVTheme.contentBackground.ignoresSafeArea())
     .navigationTitle("TV Guide")
+    .searchable(
+      text: $searchText,
+      placement: .navigationBarDrawer(displayMode: .always),
+      prompt: "Search channels"
+    )
     .onChange(of: selectedCategory) {
+      displayLimit = 250
+    }
+    .onChange(of: searchText) {
       displayLimit = 250
     }
     .toolbar {
@@ -317,55 +337,5 @@ struct ChannelLibraryView: View {
       }
       .preferredColorScheme(.dark)
     }
-  }
-}
-
-private struct ChannelLibraryDashboard: View {
-  let totalChannelCount: Int
-
-  var body: some View {
-    HStack(spacing: 14) {
-      TipTVBrandLogo(size: 24)
-        .accessibilityLabel("Tiptv")
-
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Your TV, all in one place")
-          .font(.system(size: 15, weight: .bold, design: .rounded))
-          .foregroundStyle(.white)
-
-        Text(
-          totalChannelCount == 0
-            ? "Add a playlist to get started" : "\(totalChannelCount.formatted()) channels ready"
-        )
-        .font(.system(size: 11, weight: .medium, design: .rounded))
-        .foregroundStyle(.white.opacity(0.58))
-      }
-
-      Spacer()
-
-      if totalChannelCount > 0 {
-        Label("LIVE", systemImage: "dot.radiowaves.left.and.right")
-          .font(.system(size: 10, weight: .black, design: .rounded))
-          .foregroundStyle(TipTVTheme.liveRed)
-          .padding(.horizontal, 9)
-          .padding(.vertical, 6)
-          .background(TipTVTheme.liveRed.opacity(0.12), in: Capsule())
-      }
-    }
-    .padding(14)
-    .background(
-      TipTVTheme.cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-    )
-    .overlay {
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .strokeBorder(TipTVTheme.cardBorder, lineWidth: 0.5)
-    }
-    .overlay(alignment: .top) {
-      Capsule()
-        .fill(TipTVTheme.artworkGradient)
-        .frame(width: 72, height: 2)
-        .padding(.top, 1)
-    }
-    .shadow(color: TipTVTheme.accent.opacity(0.08), radius: 14, y: 6)
   }
 }

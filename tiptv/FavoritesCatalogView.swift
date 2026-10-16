@@ -30,6 +30,7 @@ struct FavoritesCatalogView: View {
   let baseURL: String
   let username: String
   let password: String
+  @Binding var searchText: String
   let onSelectChannel: (Channel) -> Void
   let onSelectMovie: (Channel) -> Void
   let onPlayEpisode: (Channel) -> Void
@@ -44,6 +45,7 @@ struct FavoritesCatalogView: View {
   @State private var filteredChannels: [Channel] = []
   @State private var filteredSeries: [Channel] = []
   @State private var filteredMovies: [Channel] = []
+  @State private var searchDebounceTask: Task<Void, Never>?
   @State private var filterTask: Task<Void, Never>?
 
   private var totalFavoritesCount: Int {
@@ -66,6 +68,7 @@ struct FavoritesCatalogView: View {
   private func refreshFavorites() {
     filterTask?.cancel()
     let favoriteURLs = favoritesManager.favoriteStreamURLs
+    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let currentChannels = channels
     let currentSeries = series
     let currentMovies = movies
@@ -78,21 +81,39 @@ struct FavoritesCatalogView: View {
           in: currentSeries, favoriteStreamURLs: favoriteURLs)
         let favoriteMovies = ChannelCatalog.favoriteChannels(
           in: currentMovies, favoriteStreamURLs: favoriteURLs)
-        return (favoriteChannels, favoriteSeries, favoriteMovies)
+        let visibleChannels = ChannelCatalog.favoriteChannels(
+          in: favoriteChannels, favoriteStreamURLs: favoriteURLs, query: query)
+        let visibleSeries = ChannelCatalog.favoriteChannels(
+          in: favoriteSeries, favoriteStreamURLs: favoriteURLs, query: query)
+        let visibleMovies = ChannelCatalog.favoriteChannels(
+          in: favoriteMovies, favoriteStreamURLs: favoriteURLs, query: query)
+        return (
+          favoriteChannels, favoriteSeries, favoriteMovies,
+          visibleChannels, visibleSeries, visibleMovies
+        )
       }
-      let (favoriteChannels, favoriteSeries, favoriteMovies) = await withTaskCancellationHandler {
+      let result = await withTaskCancellationHandler {
         await work.value
       } onCancel: {
         work.cancel()
       }
       guard !Task.isCancelled else { return }
 
-      allFavoriteChannels = favoriteChannels
-      allFavoriteSeries = favoriteSeries
-      allFavoriteMovies = favoriteMovies
-      filteredChannels = favoriteChannels
-      filteredSeries = favoriteSeries
-      filteredMovies = favoriteMovies
+      allFavoriteChannels = result.0
+      allFavoriteSeries = result.1
+      allFavoriteMovies = result.2
+      filteredChannels = result.3
+      filteredSeries = result.4
+      filteredMovies = result.5
+    }
+  }
+
+  private func queueSearchFilter() {
+    searchDebounceTask?.cancel()
+    searchDebounceTask = Task {
+      try? await Task.sleep(for: .milliseconds(120))
+      guard !Task.isCancelled else { return }
+      refreshFavorites()
     }
   }
 
@@ -132,8 +153,16 @@ struct FavoritesCatalogView: View {
       }
     }
     .navigationTitle("Favourites")
+    .searchable(
+      text: $searchText,
+      placement: .navigationBarDrawer(displayMode: .always),
+      prompt: "Search favourites"
+    )
     .task {
       refreshFavorites()
+    }
+    .onChange(of: searchText) { _, _ in
+      queueSearchFilter()
     }
     .onChange(of: favoritesManager.favoriteStreamURLs) { _, _ in
       refreshFavorites()
@@ -148,10 +177,11 @@ struct FavoritesCatalogView: View {
       refreshFavorites()
     }
     .onDisappear {
+      searchDebounceTask?.cancel()
       filterTask?.cancel()
     }
     .toolbar {
-      ToolbarItem(placement: .primaryAction) {
+      ToolbarItemGroup(placement: .primaryAction) {
         HStack(spacing: 5) {
           Image(systemName: "heart.fill")
             .font(.system(size: 11))

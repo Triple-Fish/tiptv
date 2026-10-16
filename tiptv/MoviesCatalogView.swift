@@ -13,6 +13,7 @@ struct MoviesCatalogView: View {
   let items: [Channel]
   let title: String
   var isLoading: Bool = false
+  @Binding var searchText: String
   let onSelectChannel: (Channel) -> Void
   var onReload: (() -> Void)? = nil
 
@@ -20,12 +21,14 @@ struct MoviesCatalogView: View {
     items: [Channel],
     title: String,
     isLoading: Bool = false,
+    searchText: Binding<String> = .constant(""),
     onSelectChannel: @escaping (Channel) -> Void,
     onReload: (() -> Void)? = nil
   ) {
     self.items = items
     self.title = title
     self.isLoading = isLoading
+    self._searchText = searchText
     self.onSelectChannel = onSelectChannel
     self.onReload = onReload
   }
@@ -53,6 +56,7 @@ struct MoviesCatalogView: View {
   }
 
   @State private var filteredItems: [Channel] = []
+  @State private var searchDebounceTask: Task<Void, Never>?
   @State private var filterTask: Task<Void, Never>?
 
   private var featuredItem: Channel? {
@@ -63,6 +67,7 @@ struct MoviesCatalogView: View {
     let currentItems = items
     let format = selectedFormat
     let grp = selectedGroup
+    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let isMovies = (title == "Movies")
 
     filterTask?.cancel()
@@ -75,7 +80,7 @@ struct MoviesCatalogView: View {
           in: currentItems,
           group: requiredGroup,
           pathExtension: requiredExtension,
-          query: ""
+          query: query
         )
       }
       let result = await withTaskCancellationHandler {
@@ -89,13 +94,22 @@ struct MoviesCatalogView: View {
     }
   }
 
+  private func queueSearchFilter() {
+    searchDebounceTask?.cancel()
+    searchDebounceTask = Task {
+      try? await Task.sleep(for: .milliseconds(120))
+      guard !Task.isCancelled else { return }
+      performFilter()
+    }
+  }
+
   var body: some View {
     ScrollView(showsIndicators: false) {
       VStack(spacing: 20) {
         let resumable = continueWatching.entries.filter { entry in
           title == "Series" ? entry.channel.isSeries : entry.channel.isMovie
         }
-        if !resumable.isEmpty {
+        if searchText.isEmpty, !resumable.isEmpty {
           VStack(alignment: .leading, spacing: 10) {
             Text("Continue Watching")
               .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -226,10 +240,19 @@ struct MoviesCatalogView: View {
               .font(.system(size: 15, weight: .semibold, design: .rounded))
               .foregroundStyle(.white.opacity(0.7))
 
+            if !searchText.isEmpty {
+              Button("Clear Search") {
+                searchText = ""
+              }
+              .buttonStyle(.borderedProminent)
+              .tint(themeManager.accent)
+              .padding(.top, 4)
+            }
+
           }
         } else {
           // Featured Hero Poster Card
-          if let item = featuredItem, selectedGroup == "All" {
+          if let item = featuredItem, searchText.isEmpty, selectedGroup == "All" {
             featuredHeroCard(item: item)
           }
 
@@ -281,6 +304,11 @@ struct MoviesCatalogView: View {
     }
     .background(TipTVTheme.contentBackground.ignoresSafeArea())
     .navigationTitle(title)
+    .searchable(
+      text: $searchText,
+      placement: .navigationBarDrawer(displayMode: .always),
+      prompt: "Search \(title.lowercased())"
+    )
     .toolbar {
       ToolbarItemGroup(placement: .primaryAction) {
         if isLoading {
@@ -338,15 +366,23 @@ struct MoviesCatalogView: View {
       guard !Task.isCancelled else { return }
 
       cachedGroups = sortedGroups
-      if selectedGroup == "All" && selectedFormat == .all {
+      if selectedGroup == "All" && searchText.isEmpty && selectedFormat == .all {
         filteredItems = initialFiltered
       } else {
         performFilter()
       }
     }
+    .onChange(of: searchText) { _, _ in
+      displayLimit = 120
+      queueSearchFilter()
+    }
     .onChange(of: selectedGroup) { _, _ in
       displayLimit = 120
       performFilter()
+    }
+    .onDisappear {
+      searchDebounceTask?.cancel()
+      filterTask?.cancel()
     }
     .sheet(item: $selectedSeries) { seriesItem in
       SeriesDetailView(
